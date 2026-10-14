@@ -20,7 +20,11 @@ internal static class SignatureRevision
     private const int ByteRangeWidth = 40;
     private const int MaxDepth = 32;
 
-    public static PreparedRevision Prepare(byte[] baseBytes, DateTimeOffset signingTime, string signerName, string reason)
+    /// <summary>
+    /// vis өгсөн бол харагдах widget (APPEARANCE_SPEC.md): /Rect нь vis.Page хуудсан дээр, /F 4, /AP /N form XObject (+ 2
+    /// фонт), widget тэр хуудасны /Annots-д. vis.Name нь /Name-тэй ижил (бичигдэх ёстой — эс бөгөөс AppearanceException).
+    /// </summary>
+    public static PreparedRevision Prepare(byte[] baseBytes, DateTimeOffset signingTime, string signerName, string reason, Visible? vis = null)
     {
         var inc = Incremental.Open(baseBytes);
         var root = inc.Root;
@@ -39,6 +43,8 @@ internal static class SignatureRevision
         var fieldName = "Signature " + k.ToString(CultureInfo.InvariantCulture);
 
         uint sigId = inc.Reserve(), fieldId = inc.Reserve(), catId = inc.Reserve();
+        var apIds = new uint[vis is null ? 0 : 11]; // харагдах: form, F1 ×5, F2 ×5
+        for (int i = 0; i < apIds.Length; i++) apIds[i] = inc.Reserve();
 
         // ── Sig толь (placeholder) ──
         var sig = new MemoryStream();
@@ -56,13 +62,30 @@ internal static class SignatureRevision
         sig.Ascii("\n>>");
         long sigStart = inc.WriteObject(sigId, sig.ToArray());
 
-        // ── Талбар + үл харагдах widget ──
-        var fld = new MemoryStream();
-        fld.Ascii("<<\n  /Type /Annot\n  /Subtype /Widget\n  /Rect [0 0 0 0]\n");
-        var (page, hasPage) = FirstPage(root.Key("Pages"), 0);
-        if (hasPage) fld.Ascii(string.Create(CultureInfo.InvariantCulture, $"  /P {page.Ptr.Id} {page.Ptr.Gen} R\n"));
-        fld.Ascii(string.Create(CultureInfo.InvariantCulture, $"  /F 132\n  /FT /Sig\n  /T ({fieldName})\n  /V {sigId} 0 R\n>>"));
-        inc.WriteObject(fieldId, fld.ToArray());
+        // ── Талбар + widget ──
+        PdfValue page;
+        bool hasPage;
+        if (vis is null)
+        {
+            // Үл харагдах (digitorus createVisualSignature, invisible): эхний хуудас.
+            var fld = new MemoryStream();
+            fld.Ascii("<<\n  /Type /Annot\n  /Subtype /Widget\n  /Rect [0 0 0 0]\n");
+            (page, hasPage) = FirstPage(root.Key("Pages"), 0);
+            if (hasPage) fld.Ascii(string.Create(CultureInfo.InvariantCulture, $"  /P {page.Ptr.Id} {page.Ptr.Gen} R\n"));
+            fld.Ascii(string.Create(CultureInfo.InvariantCulture, $"  /F 132\n  /FT /Sig\n  /T ({fieldName})\n  /V {sigId} 0 R\n>>"));
+            inc.WriteObject(fieldId, fld.ToArray());
+        }
+        else
+        {
+            if (n == "" || GoText.TrimSpace(signerName) != vis.Name) throw new AppearanceException("/Name бичигдэхгүй нэр");
+            (page, hasPage) = SignatureAppearance.NthPage(root.Key("Pages"), vis.Page);
+            if (!hasPage) throw new AppearanceException("хуудас " + vis.Page.ToString(CultureInfo.InvariantCulture) + " алга");
+            var (box, rot) = SignatureAppearance.PageGeometry(page);
+            var rect = SignatureAppearance.Rect(box, rot, vis.X, vis.Y, vis.W, vis.H);
+            var bodies = SignatureAppearance.Objects(new AppearanceParams(vis.W, vis.H, rot, vis.Name, vis.Role, vis.Lang, vis.Date, vis.Url), apIds);
+            inc.WriteObject(fieldId, SignatureAppearance.Widget(fieldName, rect, page.Ptr.Id, page.Ptr.Gen, sigId, apIds[0]));
+            for (int i = 0; i < bodies.Length; i++) inc.WriteObject(apIds[i], bodies[i]);
+        }
         if (hasPage) AddWidgetToPage(inc, page, fieldId);
 
         // ── Шинэ Catalog ──

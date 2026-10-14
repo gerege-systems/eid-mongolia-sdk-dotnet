@@ -81,6 +81,7 @@ public static class EidPades
             throw new EidPadesException("REQUEST_INVALID", "docId must be a lowercase UUID");
         if (!string.IsNullOrEmpty(options.Lang) && options.Lang is not ("mn" or "en"))
             throw new EidPadesException("REQUEST_INVALID", "lang: mn | en");
+        CheckAppearance(options);
         var now = (options.SigningTime ?? DateTimeOffset.UtcNow).ToOffset(SigningZone);
 
         var inHex = PrepState.Hex(SHA256.HashData(pdf));
@@ -116,10 +117,15 @@ public static class EidPades
         }
         var name = options.SignerName;
         if (string.IsNullOrWhiteSpace(name) || GoText.TrimSpace(name) == "") name = SignerDisplayName(cert);
+        var vis = options.Appearance is null ? null : VisibleSpec(pdf, options, name, now, docId, revIndex);
         PreparedRevision prep;
         try
         {
-            prep = SignatureRevision.Prepare(baseBytes, now, name, options.Reason ?? "");
+            prep = SignatureRevision.Prepare(baseBytes, now, name, options.Reason ?? "", vis);
+        }
+        catch (AppearanceException e)
+        {
+            throw new EidPadesException("REQUEST_INVALID", "appearance: " + e.Message, e);
         }
         catch (Exception e) when (Prechecks.IsParseError(e))
         {
@@ -235,7 +241,7 @@ public static class EidPades
         }
         if (outPdf.Length > MaxOutputBytes) throw new EidPadesException("PDF_TOO_LARGE", "output exceeds 10 MiB");
 
-        var prior = SelfCheck(outPdf, st);
+        var (prior, priorRev) = SelfCheck(outPdf, st);
         return new Completed
         {
             Pdf = outPdf,
@@ -249,14 +255,15 @@ public static class EidPades
             RevIndex = st.RevIndex,
             SigRevSha256 = PrepState.Hex(SHA256.HashData(signed)),
             PriorCmsSha256 = prior,
+            PriorRevisionSha256 = priorRev,
         };
     }
 
     /// <summary>
     /// Хөнгөн self-check (бүрэн validator-гүй): гаралтын гарын үсгийн тоо = revIndex, шинэ гарын үсэг криптограф хүчинтэй, /DSS
-    /// бий. Өмнөх гарын үсгүүдийн CMS-ийн SHA-256-ийг (баримтын дарааллаар) буцаана.
+    /// бий. Өмнөх гарын үсгүүдийн CMS-ийн ба revision-ий (баримт[0 : ByteRange төгсгөл]) SHA-256-ийг (баримтын дарааллаар) буцаана.
     /// </summary>
-    private static List<string> SelfCheck(byte[] outPdf, PrepState st)
+    private static (List<string> Cms, List<string> Revision) SelfCheck(byte[] outPdf, PrepState st)
     {
         try
         {
@@ -265,17 +272,67 @@ public static class EidPades
             if (sigs.Count != st.RevIndex || !hasDss) throw new FormatException("signature count / DSS");
             Prechecks.CheckSignature(outPdf, sigs[^1]);
             var prior = new List<string>();
+            var priorRev = new List<string>();
             for (int i = 0; i < sigs.Count - 1; i++)
             {
                 var der = Prechecks.FirstSequence(Latin1.ToBytes(sigs[i].ContentsRaw));
-                if (der is not null) prior.Add(PrepState.Hex(SHA256.HashData(der)));
+                if (der is null) continue;
+                var br = sigs[i].ByteRange ?? throw new FormatException("prior signature without /ByteRange");
+                prior.Add(PrepState.Hex(SHA256.HashData(der)));
+                priorRev.Add(PrepState.Hex(SHA256.HashData(outPdf.AsSpan(0, checked((int)(br[2] + br[3]))))));
             }
-            return prior;
+            return (prior, priorRev);
         }
         catch (Exception e) when (Prechecks.IsParseError(e) || e is CryptographicException or AsnContentException)
         {
             throw new EidPadesException("SELF_VALIDATION_FAILED", "output failed the self-check: " + e.Message, e);
         }
+    }
+
+    /// <summary>Appearance-ийн PDF-ээс үл хамаарах шалгалт (Go checkAppearance, APPEARANCE_SPEC.md §1).</summary>
+    private static void CheckAppearance(PrepareOptions o)
+    {
+        var a = o.Appearance;
+        if (a is null) return;
+        static EidPadesException Bad(string msg) => new("REQUEST_INVALID", "appearance: " + msg);
+        foreach (var v in new[] { a.X, a.Y, a.Width, a.Height })
+            if (!double.IsFinite(v) || v < 0 || v > 14400) throw Bad("x, y, width, height нь 0…14400 pt");
+        if (a.Page < 0) throw Bad("page ≥ 0");
+        if (!string.IsNullOrEmpty(a.Lang) && a.Lang is not ("mn" or "en")) throw Bad("lang: mn | en");
+        if (!string.IsNullOrEmpty(o.ClaimedRole) && !RoleText(o.ClaimedRole)) throw Bad("claimedRole-д удирдах тэмдэгт");
+    }
+
+    /// <summary>validator-ийн validClaimedRole-тэй ижил: Cc/Cf үгүй, буруу UTF-16 (ганц surrogate) үгүй.</summary>
+    private static bool RoleText(string s)
+    {
+        if (!GoText.IsValidUtf16(s)) return false;
+        foreach (var r in s.EnumerateRunes())
+            if (Rune.GetUnicodeCategory(r) is UnicodeCategory.Control or UnicodeCategory.Format) return false;
+        return true;
+    }
+
+    /// <summary>Go visibleSpec: хуудас (0 → оролтын сүүлийн), h100, хэл, огноо (+08), verify URL.</summary>
+    private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex)
+    {
+        var a = o.Appearance!;
+        if (docId == "") throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас алга)");
+        int n;
+        try
+        {
+            n = SignatureAppearance.PageCount(doc);
+        }
+        catch (Exception e) when (Prechecks.IsParseError(e))
+        {
+            throw new EidPadesException("PDF_INVALID", "not a PDF or damaged", e);
+        }
+        int page = a.Page == 0 ? n : a.Page;
+        if (page > n)
+            throw new EidPadesException("REQUEST_INVALID", string.Create(CultureInfo.InvariantCulture, $"appearance: page {page} > хуудасны тоо {n}"));
+        var lang = !string.IsNullOrEmpty(a.Lang) ? a.Lang : !string.IsNullOrEmpty(o.Lang) ? o.Lang : "mn";
+        return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(a.Width),
+            SignatureAppearance.Round100(a.Height), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
+            now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " (+08)",
+            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>DTBS дээрх гарын үсгийг шалгаж CMS-д бичих хэлбэрээр (RSA хэвээр, ECDSA DER) буцаана; таарахгүй бол null.</summary>
