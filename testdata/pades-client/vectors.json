@@ -1,0 +1,261 @@
+{
+  "coreCommit": "5d07e296b41902409be4e1fa414e7a714a2aed3b",
+  "prepare": [
+    {
+      "name": "quartz-plain",
+      "input": "input/base-quartz.pdf",
+      "signerName": "TEST SIGNER",
+      "reason": "Гэрээ баталгаажуулав",
+      "signingTime": "2026-10-14T12:00:00+08:00",
+      "docId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "verifyPage": false,
+      "dtbs": "287fda6923561dcc4b763ae60c86bf7810e02ef5a78b41bae3130c02f041813a",
+      "digest": "22e602c23930e1926f9d515e43379ed4e9bea4414e55e213026e9c355409617d",
+      "stateSha256": "01df25cd88d5a489603902ef1455c26639c22214f54550e1b569609415b4787b"
+    },
+    {
+      "name": "objstm-role",
+      "input": "input/base-objstm.pdf",
+      "signerName": "TEST SIGNER",
+      "claimedRole": "Гүйцэтгэх захирал",
+      "signingTime": "2026-10-14T12:00:00+08:00",
+      "docId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "verifyPage": false,
+      "dtbs": "f910b04922760affacc832b9ccc4e37db484d3d977234e2940c076ff40213e36",
+      "digest": "0e09d488252735dcc665e74ea0817933fa4015b035bb0db911bd53ae1088b8bf",
+      "stateSha256": "48af9e4b7fc85432a047362a2b68b6fdaaf716bacd2e3f60048a6b347c6958e5"
+    },
+    {
+      "name": "quartz-verify-page",
+      "input": "input/base-quartz.pdf",
+      "signingTime": "2026-10-14T12:00:00+08:00",
+      "docId": "1b4e28ba-2fa1-41d2-883f-0016d3cca427",
+      "verifyPage": true,
+      "fileName": "гэрээ.pdf",
+      "lang": "mn",
+      "dtbs": "6e4ffad31f40ff44fbbf67057bf054dbd1b0ef51fbe6482111d96e64370ef39e",
+      "digest": "207694e53881f05d167fa0966b10a424b9eb3abc6433ac2408b278a4aa4fb493",
+      "stateSha256": "d0e26b9b440694490a90beb082b7de071bff5ccadc37910e7ca640e78ed7a4b4"
+    }
+  ],
+  "profile": "pades-client/1",
+  "verify": [
+    {
+      "name": "quartz-1-dss.pdf",
+      "input": "input/quartz-1-dss.pdf",
+      "time": "2026-10-15T00:00:00Z",
+      "report": {
+        "indication": "indeterminate",
+        "signatures": [
+          {
+            "indication": "indeterminate",
+            "problems": [
+              "revocation_unavailable"
+            ],
+            "signer_name": "TEST SIGNER",
+            "claimed_name": "BAYAR BAT",
+            "signer_name_source": "certificate",
+            "claimed_time": "2026-10-14T12:56:45Z",
+            "covers_whole_document": false,
+            "extended_by_signatures_only": true,
+            "later_signatures": 0,
+            "visible_later_signature": false,
+            "chain_trusted": true,
+            "chain": [
+              "TEST SIGNER",
+              "PAdES Test Root"
+            ],
+            "certificate": {
+              "common_name": "TEST SIGNER",
+              "subject": "CN=TEST SIGNER,C=MN",
+              "issuer": "CN=PAdES Test Root,C=MN",
+              "serial": "3C955AF700DF589D3C686F39FA7C54612624A8F3",
+              "not_before": "2026-10-14T12:56:42Z",
+              "not_after": "2026-10-16T12:56:42Z",
+              "usage": "sign",
+              "issued_by_eid": false,
+              "revocation": {
+                "status": "unknown"
+              }
+            },
+            "signature_level": "PAdES-BASELINE-B",
+            "ltv": {
+              "complete": true,
+              "missing": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "quartz-2-dss.pdf",
+      "input": "input/quartz-2-dss.pdf",
+      "time": "2026-10-15T00:00:00Z",
+      "report": {
+        "indication": "indeterminate",
+        "signatures": [
+          {
+            "indication": "indeterminate",
+            "problems": [
+              "revocation_unavailable"
+            ],
+            "signer_name": "TEST SIGNER",
+            "claimed_name": "BAYAR BAT",
+            "signer_name_source": "certificate",
+            "claimed_time": "2026-10-14T12:56:45Z",
+            "covers_whole_document": false,
+            "extended_by_signatures_only": true,
+            "later_signatures": 1,
+            "visible_later_signature": false,
+            "chain_trusted": true,
+            "chain": [
+              "TEST SIGNER",
+              "PAdES Test Root"
+            ],
+            "certificate": {
+              "common_name": "TEST SIGNER",
+              "subject": "CN=TEST SIGNER,C=MN",
+              "issuer": "CN=PAdES Test Root,C=MN",
+              "serial": "3C955AF700DF589D3C686F39FA7C54612624A8F3",
+              "not_before": "2026-10-14T12:56:42Z",
+              "not_after": "2026-10-16T12:56:42Z",
+              "usage": "sign",
+              "issued_by_eid": false,
+              "revocation": {
+                "status": "unknown"
+              }
+            },
+            "signature_level": "PAdES-BASELINE-B",
+            "ltv": {
+              "complete": true,
+              "missing": []
+            }
+          },
+          {
+            "indication": "indeterminate",
+            "problems": [
+              "revocation_unavailable"
+            ],
+            "signer_name": "TEST SIGNER",
+            "claimed_name": "Бат Болд",
+            "signer_name_source": "certificate",
+            "reason": "Гэрэгэ Системс ХХК-ийг төлөөлж",
+            "claimed_time": "2026-10-14T12:56:46Z",
+            "covers_whole_document": false,
+            "extended_by_signatures_only": true,
+            "later_signatures": 0,
+            "visible_later_signature": false,
+            "chain_trusted": true,
+            "chain": [
+              "TEST SIGNER",
+              "PAdES Test Root"
+            ],
+            "certificate": {
+              "common_name": "TEST SIGNER",
+              "subject": "CN=TEST SIGNER,C=MN",
+              "issuer": "CN=PAdES Test Root,C=MN",
+              "serial": "3C955AF700DF589D3C686F39FA7C54612624A8F3",
+              "not_before": "2026-10-14T12:56:42Z",
+              "not_after": "2026-10-16T12:56:42Z",
+              "usage": "sign",
+              "issued_by_eid": false,
+              "revocation": {
+                "status": "unknown"
+              }
+            },
+            "signature_level": "PAdES-BASELINE-B",
+            "ltv": {
+              "complete": true,
+              "missing": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "objstm-2-dss.pdf",
+      "input": "input/objstm-2-dss.pdf",
+      "time": "2026-10-15T00:00:00Z",
+      "report": {
+        "indication": "indeterminate",
+        "signatures": [
+          {
+            "indication": "indeterminate",
+            "problems": [
+              "revocation_unavailable"
+            ],
+            "signer_name": "TEST SIGNER",
+            "claimed_name": "BAYAR BAT",
+            "signer_name_source": "certificate",
+            "claimed_time": "2026-10-14T12:56:46Z",
+            "covers_whole_document": false,
+            "extended_by_signatures_only": true,
+            "later_signatures": 1,
+            "visible_later_signature": false,
+            "chain_trusted": true,
+            "chain": [
+              "TEST SIGNER",
+              "PAdES Test Root"
+            ],
+            "certificate": {
+              "common_name": "TEST SIGNER",
+              "subject": "CN=TEST SIGNER,C=MN",
+              "issuer": "CN=PAdES Test Root,C=MN",
+              "serial": "3C955AF700DF589D3C686F39FA7C54612624A8F3",
+              "not_before": "2026-10-14T12:56:42Z",
+              "not_after": "2026-10-16T12:56:42Z",
+              "usage": "sign",
+              "issued_by_eid": false,
+              "revocation": {
+                "status": "unknown"
+              }
+            },
+            "signature_level": "PAdES-BASELINE-B",
+            "ltv": {
+              "complete": true,
+              "missing": []
+            }
+          },
+          {
+            "indication": "indeterminate",
+            "problems": [
+              "revocation_unavailable"
+            ],
+            "signer_name": "TEST SIGNER",
+            "claimed_name": "Бат Болд",
+            "signer_name_source": "certificate",
+            "reason": "Гэрэгэ Системс ХХК-ийг төлөөлж",
+            "claimed_time": "2026-10-14T12:56:47Z",
+            "covers_whole_document": false,
+            "extended_by_signatures_only": true,
+            "later_signatures": 0,
+            "visible_later_signature": false,
+            "chain_trusted": true,
+            "chain": [
+              "TEST SIGNER",
+              "PAdES Test Root"
+            ],
+            "certificate": {
+              "common_name": "TEST SIGNER",
+              "subject": "CN=TEST SIGNER,C=MN",
+              "issuer": "CN=PAdES Test Root,C=MN",
+              "serial": "3C955AF700DF589D3C686F39FA7C54612624A8F3",
+              "not_before": "2026-10-14T12:56:42Z",
+              "not_after": "2026-10-16T12:56:42Z",
+              "usage": "sign",
+              "issued_by_eid": false,
+              "revocation": {
+                "status": "unknown"
+              }
+            },
+            "signature_level": "PAdES-BASELINE-B",
+            "ltv": {
+              "complete": true,
+              "missing": []
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

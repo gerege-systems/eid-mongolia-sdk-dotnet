@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>GeregeSystems.EidMongolia.Pades</RootNamespace>
+
+    <PackageId>GeregeSystems.EidMongolia.Pades</PackageId>
+    <Authors>Gerege Systems LLC</Authors>
+    <Company>Gerege Systems LLC</Company>
+    <Description>eID Mongolia client-side PAdES (PDF never leaves the client): Prepare → sign DTBS on phone/token → Complete → Verify. P/Invoke wrapper over eidpades.dll (Go core).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>eid;mongolia;pades;pdf;signature;etsi</PackageTags>
+    <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
+    <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <!-- native/<rid>/eidpades.dll — build/build-native.ps1 үүсгэнэ (CI). Байхгүй RID-ийг алгасна. -->
+    <None Include="../../native/win-x64/eidpades.dll" Condition="Exists('../../native/win-x64/eidpades.dll')"
+          Pack="true" PackagePath="runtimes/win-x64/native/" />
+    <None Include="../../native/win-arm64/eidpades.dll" Condition="Exists('../../native/win-arm64/eidpades.dll')"
+          Pack="true" PackagePath="runtimes/win-arm64/native/" />
+  </ItemGroup>
+
+</Project>
