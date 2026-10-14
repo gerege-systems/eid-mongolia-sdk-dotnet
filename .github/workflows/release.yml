@@ -1,0 +1,35 @@
+name: Release
+# v* tag → CI (Windows + Linux golden) → nupkg → GitHub Release asset + GitHub Packages (NuGet).
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  packages: write
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg
+      - name: version = tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ls nupkg
+          test -f "nupkg/GeregeSystems.EidMongolia.Pades.$tag.nupkg" || { echo "::error::csproj <Version> ≠ tag $tag"; exit 1; }
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" nupkg/*.nupkg --title "$GITHUB_REF_NAME" --notes "CHANGELOG.md-г үз."
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: GitHub Packages
+        run: dotnet nuget push "nupkg/*.nupkg" --source "https://nuget.pkg.github.com/gerege-systems/index.json" --api-key "${{ github.token }}"

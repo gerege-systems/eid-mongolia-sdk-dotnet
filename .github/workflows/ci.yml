@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    # Байт-ижил conformance: Go reference-ийн golden (testdata/golden) Windows ба Linux дээр.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet format EidMongolia.Pades.sln --verify-no-changes
+      - run: dotnet build EidMongolia.Pades.sln -c Release
+      - run: dotnet test EidMongolia.Pades.sln -c Release --no-build --logger "console;verbosity=normal"
+      - name: pack
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet pack src/GeregeSystems.EidMongolia.Pades -c Release --no-build -o artifacts/nupkg
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: nupkg
+          path: artifacts/nupkg/*.nupkg
+          if-no-files-found: error
+
+  golden-sync:
+    # testdata/golden нь build/go-sdk.ref дээрх eid-mongolia-sdk-go pades/testdata/golden-тэй яг ижил.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build/sync-golden.sh --check
+
+  changelog:
+    # PR бүрд changelog.d/ фрагмент; CHANGELOG.md-г зөвхөн release/* салбар засна (анхны үүсгэлтээс бусад).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - shell: bash
+        run: |
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+          echo "$changed"
+          if ! echo "$changed" | grep -qE '^changelog\.d/[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
+            echo "::error::changelog.d/<YYYY-MM-DD>-<сэдэв>.md фрагмент нэмнэ үү"; exit 1
+          fi
+          if git diff --name-only --diff-filter=M "$base"...HEAD | grep -qx 'CHANGELOG.md' && [[ "${{ github.head_ref }}" != release/* ]]; then
+            echo "::error::CHANGELOG.md-г зөвхөн release/* салбар засна"; exit 1
+          fi

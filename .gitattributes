@@ -1,0 +1,10 @@
+* text=auto eol=lf
+# Fixture/asset: байтыг хэвээр (golden-sync байтаар тулгана).
+testdata/** -text
+src/GeregeSystems.EidMongolia.Pades/Assets/** -text
+src/GeregeSystems.EidMongolia.Pades/Trust/** -text
+*.pdf binary
+*.der binary
+*.p7s binary
+*.zlib binary
+*.nupkg binary
