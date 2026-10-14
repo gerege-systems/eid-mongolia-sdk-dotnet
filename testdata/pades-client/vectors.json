@@ -1,5 +1,5 @@
 {
-  "coreCommit": "5d07e296b41902409be4e1fa414e7a714a2aed3b",
+  "coreCommit": "56a26eb774dd76bfe35aee3a3a5d7e6eff4d50bb",
   "prepare": [
     {
       "name": "quartz-plain",
@@ -9,9 +9,9 @@
       "signingTime": "2026-10-14T12:00:00+08:00",
       "docId": "0f8fad5b-d9cb-469f-a165-70867728950e",
       "verifyPage": false,
-      "dtbs": "287fda6923561dcc4b763ae60c86bf7810e02ef5a78b41bae3130c02f041813a",
+      "dtbs": "59919ee0de483d08fd215ab3c7a081ec364b566c0b61eae40b58ca02c86b2035",
       "digest": "22e602c23930e1926f9d515e43379ed4e9bea4414e55e213026e9c355409617d",
-      "stateSha256": "01df25cd88d5a489603902ef1455c26639c22214f54550e1b569609415b4787b"
+      "stateSha256": "e7d9b51db2b35a0cdf7d6d751a3839f60a883fac599f01ade6d40de4ee17b539"
     },
     {
       "name": "objstm-role",
@@ -21,9 +21,9 @@
       "signingTime": "2026-10-14T12:00:00+08:00",
       "docId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       "verifyPage": false,
-      "dtbs": "f910b04922760affacc832b9ccc4e37db484d3d977234e2940c076ff40213e36",
+      "dtbs": "d4d284bfcf2b708fe019b2487af05071534f33a6136a9785a9384850a2940264",
       "digest": "0e09d488252735dcc665e74ea0817933fa4015b035bb0db911bd53ae1088b8bf",
-      "stateSha256": "48af9e4b7fc85432a047362a2b68b6fdaaf716bacd2e3f60048a6b347c6958e5"
+      "stateSha256": "cfaffc615b45a483ab8429d6e173a4e8d89170c30e627485d2b2ae35a57c1fe7"
     },
     {
       "name": "quartz-verify-page",
@@ -33,9 +33,9 @@
       "verifyPage": true,
       "fileName": "гэрээ.pdf",
       "lang": "mn",
-      "dtbs": "6e4ffad31f40ff44fbbf67057bf054dbd1b0ef51fbe6482111d96e64370ef39e",
+      "dtbs": "e8bc1e01e129470d40ca24c3e80306426a07fc3347df9965defcb57d20b770f1",
       "digest": "207694e53881f05d167fa0966b10a424b9eb3abc6433ac2408b278a4aa4fb493",
-      "stateSha256": "d0e26b9b440694490a90beb082b7de071bff5ccadc37910e7ca640e78ed7a4b4"
+      "stateSha256": "495cfb95b02ba83eb4cc9aec7cbd3f388fd1bc9fca65062cd6a9fd13e4bbdb57"
     }
   ],
   "profile": "pades-client/1",
