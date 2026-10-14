@@ -51,6 +51,8 @@ namespace GeregeSystems.EidMongolia.Pades
         /// </summary>
         /// <param name="state"><see cref="PreparedDocument.State"/>.</param>
         /// <param name="signature">r||s (ECDSA), DER ECDSA эсвэл PKCS#1 v1.5 (RSA) — цөм өөрөө танина.</param>
+        /// <param name="options">TSA, итгэлийн тулгуур; <c>null</c> = анхдагч.</param>
+        /// <param name="cancellationToken">Зөвхөн эхлэхээс өмнө шалгагдана.</param>
         public static Task<Completed> CompleteAsync(byte[] state, byte[] signature, CompleteOptions? options = null,
             CancellationToken cancellationToken = default)
         {
