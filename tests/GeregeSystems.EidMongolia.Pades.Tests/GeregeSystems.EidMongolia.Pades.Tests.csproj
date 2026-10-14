@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
@@ -18,9 +19,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- win-x64 DLL (CI artifact) — тест процессийн хажууд. -->
-    <None Include="../../native/win-x64/eidpades.dll" Condition="Exists('../../native/win-x64/eidpades.dll')"
-          CopyToOutputDirectory="PreserveNewest" Link="eidpades.dll" />
     <None Include="../../testdata/**/*" CopyToOutputDirectory="PreserveNewest" LinkBase="testdata" />
   </ItemGroup>
 

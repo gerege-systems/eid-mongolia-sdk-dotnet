@@ -1,5 +1,5 @@
 name: Release
-# v* tag → native (x64+arm64) → test → nupkg → GitHub Release asset + GitHub Packages (NuGet).
+# v* tag → CI (Windows + Linux golden) → nupkg → GitHub Release asset + GitHub Packages (NuGet).
 on:
   push:
     tags: ["v*"]

@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>12</LangVersion>
     <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <RootNamespace>GeregeSystems.EidMongolia.Pades</RootNamespace>
@@ -12,7 +12,7 @@
     <PackageId>GeregeSystems.EidMongolia.Pades</PackageId>
     <Authors>Gerege Systems LLC</Authors>
     <Company>Gerege Systems LLC</Company>
-    <Description>eID Mongolia client-side PAdES (PDF never leaves the client): Prepare → sign DTBS on phone/token → Complete → Verify. P/Invoke wrapper over eidpades.dll (Go core).</Description>
+    <Description>eID Mongolia client-side PAdES for .NET (PDF never leaves the client): Prepare → citizen signs the 32-byte DTBS on phone/token → CompleteAsync (RFC 3161 TSA, OCSP/CRL, DSS). Native C# port of the Go reference, byte-identical output.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>eid;mongolia;pades;pdf;signature;etsi</PackageTags>
@@ -21,17 +21,18 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.2" />
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GeregeSystems.EidMongolia.Pades.Tests" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
-    <!-- native/<rid>/eidpades.dll — build/build-native.ps1 үүсгэнэ (CI). Байхгүй RID-ийг алгасна. -->
-    <None Include="../../native/win-x64/eidpades.dll" Condition="Exists('../../native/win-x64/eidpades.dll')"
-          Pack="true" PackagePath="runtimes/win-x64/native/" />
-    <None Include="../../native/win-arm64/eidpades.dll" Condition="Exists('../../native/win-arm64/eidpades.dll')"
-          Pack="true" PackagePath="runtimes/win-arm64/native/" />
+    <EmbeddedResource Include="Trust/*.pem" LogicalName="eid.%(Filename).pem" />
+    <EmbeddedResource Include="Assets/*.zlib;Assets/*.json" LogicalName="eid.assets.%(Filename)%(Extension)" />
+    <None Include="Assets/OFL.txt" Pack="true" PackagePath="/licenses/NotoSans-OFL.txt" />
+    <None Include="Pdf/LICENSE.digitorus-pdf" Pack="true" PackagePath="/licenses/" />
+    <None Include="Pdf/LICENSE.digitorus-pdfsign" Pack="true" PackagePath="/licenses/" />
   </ItemGroup>
 
 </Project>

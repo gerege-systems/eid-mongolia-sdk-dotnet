@@ -2,10 +2,10 @@ using System;
 
 namespace GeregeSystems.EidMongolia.Pades
 {
-    /// <summary>Тогтвортой алдааны кодууд (Go цөмийн <c>code</c> string-тэй 1:1).</summary>
+    /// <summary>Тогтвортой алдааны кодууд (Go reference <c>pades.Code*</c>-тэй 1:1).</summary>
     public enum EidPadesErrorCode
     {
-        /// <summary>Цөмөөс ирсэн үл таних код (шинэ цөм, хуучин wrapper). <see cref="EidPadesException.RawCode"/>-г үз.</summary>
+        /// <summary>Танихгүй код (шинэ профайл). <see cref="EidPadesException.RawCode"/>-г үз.</summary>
         Unknown = 0,
         /// <summary>PDF_INVALID</summary>
         PdfInvalid,
@@ -37,19 +37,17 @@ namespace GeregeSystems.EidMongolia.Pades
         SignerInvalid,
         /// <summary>REQUEST_INVALID — сонголт буруу (docId, lang, fileName, roots…).</summary>
         RequestInvalid,
-        /// <summary>INTERNAL — цөмийн дотоод алдаа.</summary>
+        /// <summary>INTERNAL — дотоод алдаа.</summary>
         Internal,
-        /// <summary>NATIVE_UNAVAILABLE — eidpades.dll ачаалагдсангүй (RID дэмжигдэхгүй / файл алга).</summary>
-        NativeUnavailable,
     }
 
-    /// <summary>eID PAdES цөмийн алдаа. <see cref="Code"/> тогтвортой — үүгээр салаална; <see cref="Exception.Message"/> зөвхөн лог/хүнд.</summary>
+    /// <summary>eID PAdES алдаа. <see cref="Code"/> тогтвортой — үүгээр салаална; <see cref="Exception.Message"/> зөвхөн лог/хүнд.</summary>
     public sealed class EidPadesException : Exception
     {
         /// <summary>Тогтвортой код.</summary>
         public EidPadesErrorCode Code { get; }
 
-        /// <summary>Цөмөөс ирсэн түүхий код (жишээ нь <c>PDF_INVALID</c>).</summary>
+        /// <summary>Түүхий код (жишээ нь <c>PDF_INVALID</c>).</summary>
         public string RawCode { get; }
 
         /// <summary>Шинэ алдаа.</summary>
@@ -80,7 +78,6 @@ namespace GeregeSystems.EidMongolia.Pades
                 case "SIGNER_INVALID": return EidPadesErrorCode.SignerInvalid;
                 case "REQUEST_INVALID": return EidPadesErrorCode.RequestInvalid;
                 case "INTERNAL": return EidPadesErrorCode.Internal;
-                case "NATIVE_UNAVAILABLE": return EidPadesErrorCode.NativeUnavailable;
                 default: return EidPadesErrorCode.Unknown;
             }
         }

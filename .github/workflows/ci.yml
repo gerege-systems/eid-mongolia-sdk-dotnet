@@ -7,77 +7,40 @@ on:
 permissions:
   contents: read
 jobs:
-  native:
-    # eidpades.dll — Go цөм (build/go-sdk.ref) → c-shared. arm64 = llvm-mingw cross (x64 runner дээр).
-    runs-on: windows-latest
+  test:
+    # Байт-ижил conformance: Go reference-ийн golden (testdata/golden) Windows ба Linux дээр.
     strategy:
       fail-fast: false
       matrix:
-        arch: [x64, arm64]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.x"
-          cache: false
-      - name: llvm-mingw (arm64 cross)
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: |
-          $v = '20240619'
-          $zip = "llvm-mingw-$v-ucrt-x86_64"
-          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$v/$zip.zip" -OutFile "$env:RUNNER_TEMP\llvm.zip"
-          Expand-Archive "$env:RUNNER_TEMP\llvm.zip" -DestinationPath "$env:RUNNER_TEMP"
-          "$env:RUNNER_TEMP\$zip\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: build eidpades.dll
-        shell: pwsh
-        run: ./build/build-native.ps1 -Arch ${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-win-${{ matrix.arch }}
-          path: native/win-${{ matrix.arch }}/
-          if-no-files-found: error
-
-  test:
-    needs: native
-    runs-on: windows-latest
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: native-win-*
-          path: native/
-      - name: layout
-        shell: pwsh
-        run: |
-          Get-ChildItem native -Directory | ForEach-Object { Rename-Item $_.FullName ($_.Name -replace '^native-', '') }
-          Get-ChildItem -Recurse native | Format-Table FullName, Length
-      - run: dotnet format --verify-no-changes
-      - run: dotnet build -c Release
-      - name: test (win-x64, golden vectors through eidpades.dll)
-        run: dotnet test -c Release --no-build --logger "console;verbosity=normal"
+      - run: dotnet format EidMongolia.Pades.sln --verify-no-changes
+      - run: dotnet build EidMongolia.Pades.sln -c Release
+      - run: dotnet test EidMongolia.Pades.sln -c Release --no-build --logger "console;verbosity=normal"
       - name: pack
+        if: matrix.os == 'ubuntu-latest'
         run: dotnet pack src/GeregeSystems.EidMongolia.Pades -c Release --no-build -o artifacts/nupkg
-      - name: nupkg contains both RIDs
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $p = Get-ChildItem artifacts/nupkg/*.nupkg | Select-Object -First 1
-          $z = [IO.Compression.ZipFile]::OpenRead($p.FullName)
-          $names = $z.Entries.FullName; $z.Dispose()
-          foreach ($e in 'runtimes/win-x64/native/eidpades.dll', 'runtimes/win-arm64/native/eidpades.dll', 'lib/netstandard2.0/GeregeSystems.EidMongolia.Pades.dll', 'lib/net8.0/GeregeSystems.EidMongolia.Pades.dll') {
-            if ($names -notcontains $e) { throw "missing $e in $($p.Name)" }
-          }
       - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
         with:
           name: nupkg
           path: artifacts/nupkg/*.nupkg
+          if-no-files-found: error
+
+  golden-sync:
+    # testdata/golden нь build/go-sdk.ref дээрх eid-mongolia-sdk-go pades/testdata/golden-тэй яг ижил.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build/sync-golden.sh --check
 
   changelog:
-    # PR бүрд changelog.d/ фрагмент байх ба CHANGELOG.md хөндөгдөөгүй байх (release-ээс бусад).
+    # PR бүрд changelog.d/ фрагмент; CHANGELOG.md-г зөвхөн release/* салбар засна (анхны үүсгэлтээс бусад).
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +55,6 @@ jobs:
           if ! echo "$changed" | grep -qE '^changelog\.d/[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$'; then
             echo "::error::changelog.d/<YYYY-MM-DD>-<сэдэв>.md фрагмент нэмнэ үү"; exit 1
           fi
-          # Шинээр үүсгэх (анхны PR) зөвшөөрөгдөнө; засах нь зөвхөн release/*.
           if git diff --name-only --diff-filter=M "$base"...HEAD | grep -qx 'CHANGELOG.md' && [[ "${{ github.head_ref }}" != release/* ]]; then
             echo "::error::CHANGELOG.md-г зөвхөн release/* салбар засна"; exit 1
           fi
