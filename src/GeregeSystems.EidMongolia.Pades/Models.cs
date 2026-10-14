@@ -38,6 +38,35 @@ public sealed record PrepareOptions
 
     /// <summary>Хуудасны хэл: <c>mn</c> | <c>en</c>.</summary>
     public string? Lang { get; init; }
+
+    /// <summary>Харагдах гарын үсэг (APPEARANCE_SPEC.md). <c>null</c> = үл харагдах (анхдагч, өмнөхтэй байт-ижил).</summary>
+    public Appearance? Appearance { get; init; }
+}
+
+/// <summary>
+/// Харагдах гарын үсгийн байршил (Go <c>pades.Appearance</c>, APPEARANCE_SPEC.md §1). Координат нь pt, тухайн хуудасны
+/// CropBox (байхгүй бол MediaBox)-ийн /Rotate-ийн ДАРААХ (дэлгэцэнд харагдах) зүүн доод булангаас; X баруун тийш, Y дээш.
+/// Утга бүр 0.01 pt хүртэл тойрогдоно. Өндөр ≥ 45 pt (QR), бичвэр багтахгүй бол REQUEST_INVALID.
+/// </summary>
+public sealed record Appearance
+{
+    /// <summary>Оролтын баримтын хуудас, 1-ээс; 0 = оролтын сүүлийн хуудас (энэ Prepare-ийн нэмэх verify хуудас тооцогдохгүй).</summary>
+    public int Page { get; init; }
+
+    /// <summary>Зүүн доод булангийн X (pt, 0…14400).</summary>
+    public double X { get; init; }
+
+    /// <summary>Зүүн доод булангийн Y (pt, 0…14400).</summary>
+    public double Y { get; init; }
+
+    /// <summary>Өргөн (pt, 0…14400).</summary>
+    public double Width { get; init; }
+
+    /// <summary>Өндөр (pt, 0…14400; ≥ 45).</summary>
+    public double Height { get; init; }
+
+    /// <summary><c>mn</c> | <c>en</c>; <c>null</c>/хоосон = <see cref="PrepareOptions.Lang"/> (тэр нь хоосон бол mn).</summary>
+    public string? Lang { get; init; }
 }
 
 /// <summary><see cref="EidPades.CompleteAsync"/>-ийн сонголт.</summary>
@@ -116,4 +145,10 @@ public sealed record Completed
 
     /// <summary>Өмнөх гарын үсгүүдийн CMS DER-ийн SHA-256 (баримтын дарааллаар).</summary>
     public IReadOnlyList<string> PriorCmsSha256 { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Өмнөх гарын үсгүүдийн revision-ий SHA-256 (баримт[0 : ByteRange төгсгөл]) — <see cref="PriorCmsSha256"/>-тэй ижил
+    /// дараалал; тус бүр нь тэр гарын үсгийн өөрийн <see cref="SigRevSha256"/>-тай тэнцүү.
+    /// </summary>
+    public IReadOnlyList<string> PriorRevisionSha256 { get; init; } = Array.Empty<string>();
 }

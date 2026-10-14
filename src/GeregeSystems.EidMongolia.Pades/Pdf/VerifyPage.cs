@@ -103,15 +103,15 @@ internal static class VerifyPage
 {
     private const string MediaBox = "[0 0 595.28 841.89]";
     private const int Left = 42, Width = 510, Col2 = 297, QrModule = 2, QrTextX = 136, FileNameMax = 3;
-    private const string ColText = "0.118 0.118 0.118", ColMuted = "0.431 0.431 0.431", ColOk = "0.086 0.541 0.31",
-        ColBanner = "0.863 0.961 0.902", ColLine = "0.863 0.863 0.863", ColLink = "0.118 0.431 0.863";
+    internal const string ColText = "0.118 0.118 0.118", ColMuted = "0.431 0.431 0.431", ColOk = "0.086 0.541 0.31";
+    private const string ColBanner = "0.863 0.961 0.902", ColLine = "0.863 0.863 0.863", ColLink = "0.118 0.431 0.863";
 
     private const string BannerPath = "48 800 m\n546 800 l\n549.31 800 552 797.31 552 794 c\n552 754 l\n552 750.69 549.31 748 546 748 c\n" +
                                       "48 748 l\n44.69 748 42 750.69 42 754 c\n42 794 l\n42 797.31 44.69 800 48 800 c\nh\nf";
 
-    private sealed record Link(int X1, int Y1, int X2, int Y2, string Url);
+    internal sealed record Link(int X1, int Y1, int X2, int Y2, string Url);
 
-    private sealed class Writer
+    internal sealed class Writer
     {
         public readonly StringBuilder Ops = new();
         public readonly PageFont Reg, Bld;
@@ -159,12 +159,18 @@ internal static class VerifyPage
             }
             else
             {
-                var b = new StringBuilder("<");
-                foreach (var g in Gids(id, s)) b.Append(g.ToString("X4", CultureInfo.InvariantCulture));
-                str = b.Append('>').ToString();
+                str = GlyphHex(id, s);
             }
             Op(color + " rg");
             Op(string.Create(CultureInfo.InvariantCulture, $"BT /F{id} {size} Tf {x} {y} Td {str} Tj ET"));
+        }
+
+        /// <summary>F1/F2 бичвэрийн <c>&lt;GGGG…&gt;</c> (PAGE_SPEC.md §2).</summary>
+        public string GlyphHex(int id, string s)
+        {
+            var b = new StringBuilder("<");
+            foreach (var g in Gids(id, s)) b.Append(g.ToString("X4", CultureInfo.InvariantCulture));
+            return b.Append('>').ToString();
         }
 
         public void LinkAt(int id, int size, int x, int y, string s)
@@ -179,9 +185,11 @@ internal static class VerifyPage
             Op(string.Create(CultureInfo.InvariantCulture, $"0.75 w {Left} {y} m {Left + Width} {y} l S"));
         }
 
-        public List<string> Wrap(int id, int size, string s, int maxW, int maxLines)
+        public List<string> Wrap(int id, int size, string s, int maxW, int maxLines) => WrapLimit(id, size, s, maxW * 1000, maxLines);
+
+        /// <summary>Wrap, өргөний хязгаар limit нь 1/1000 pt-ээр (харагдах гарын үсэгт: 1/100 pt × 10).</summary>
+        public List<string> WrapLimit(int id, int size, string s, int limit, int maxLines)
         {
-            int limit = maxW * 1000;
             bool Fits(string t) => Width1000(id, size, t) <= limit;
             var lines = new List<string>();
             string cur = "";
@@ -263,7 +271,7 @@ internal static class VerifyPage
         return s;
     }
 
-    private static bool AsciiUrl(string u)
+    internal static bool AsciiUrl(string u)
     {
         foreach (var c in u)
             if (c < 0x21 || c > 0x7e || c is '(' or ')' or '\\') return false;
@@ -418,7 +426,7 @@ internal static class VerifyPage
 
     private static byte[] Ascii(string s) => Encoding.ASCII.GetBytes(s);
 
-    private static byte[] StreamObj(string extra, byte[] data)
+    internal static byte[] StreamObj(string extra, byte[] data)
     {
         var b = new MemoryStream();
         b.Ascii(string.Create(CultureInfo.InvariantCulture, $"<< /Length {data.Length}{extra} >>\nstream\n"));
@@ -429,20 +437,30 @@ internal static class VerifyPage
 
     private static void WriteFont(Incremental inc, uint[] ids, PageFont f)
     {
-        inc.WriteObject(ids[0], Ascii(string.Create(CultureInfo.InvariantCulture,
-            $"<< /Type /Font /Subtype /Type0 /BaseFont /{f.PsName} /Encoding /Identity-H /DescendantFonts [{ids[1]} 0 R] /ToUnicode {ids[4]} 0 R >>")));
+        var bodies = FontBodies(ids, f);
+        for (int i = 0; i < bodies.Length; i++) inc.WriteObject(ids[i], bodies[i]);
+    }
+
+    /// <summary>WriteFont-ийн 5 объектын бие (ids-ийн дарааллаар); verify хуудас ба харагдах гарын үсэгт ижил.</summary>
+    internal static byte[][] FontBodies(uint[] ids, PageFont f)
+    {
         var wa = new StringBuilder();
         for (int g = 0; g < f.Widths.Length; g++)
         {
             if (g > 0) wa.Append(' ');
             wa.Append(f.Width1000((ushort)g).ToString(CultureInfo.InvariantCulture));
         }
-        inc.WriteObject(ids[1], Ascii(string.Create(CultureInfo.InvariantCulture,
-            $"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{f.PsName} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {ids[2]} 0 R /CIDToGIDMap /Identity /W [0 [{wa}]] >>")));
-        inc.WriteObject(ids[2], Ascii(string.Create(CultureInfo.InvariantCulture,
-            $"<< /Type /FontDescriptor /FontName /{f.PsName} /Flags 32 /FontBBox [{f.BBox[0]} {f.BBox[1]} {f.BBox[2]} {f.BBox[3]}] /ItalicAngle 0 /Ascent {f.Ascent} /Descent {f.Descent} /CapHeight {f.CapHeight} /StemV 80 /FontFile2 {ids[3]} 0 R >>")));
-        inc.WriteObject(ids[3], StreamObj(string.Create(CultureInfo.InvariantCulture, $" /Length1 {f.Length1} /Filter /FlateDecode"), f.Stream));
-        inc.WriteObject(ids[4], StreamObj("", ToUnicode(f)));
+        return new[]
+        {
+            Ascii(string.Create(CultureInfo.InvariantCulture,
+                $"<< /Type /Font /Subtype /Type0 /BaseFont /{f.PsName} /Encoding /Identity-H /DescendantFonts [{ids[1]} 0 R] /ToUnicode {ids[4]} 0 R >>")),
+            Ascii(string.Create(CultureInfo.InvariantCulture,
+                $"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{f.PsName} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {ids[2]} 0 R /CIDToGIDMap /Identity /W [0 [{wa}]] >>")),
+            Ascii(string.Create(CultureInfo.InvariantCulture,
+                $"<< /Type /FontDescriptor /FontName /{f.PsName} /Flags 32 /FontBBox [{f.BBox[0]} {f.BBox[1]} {f.BBox[2]} {f.BBox[3]}] /ItalicAngle 0 /Ascent {f.Ascent} /Descent {f.Descent} /CapHeight {f.CapHeight} /StemV 80 /FontFile2 {ids[3]} 0 R >>")),
+            StreamObj(string.Create(CultureInfo.InvariantCulture, $" /Length1 {f.Length1} /Filter /FlateDecode"), f.Stream),
+            StreamObj("", ToUnicode(f)),
+        };
     }
 
     private static byte[] ToUnicode(PageFont f)

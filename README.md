@@ -42,6 +42,9 @@ var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
     VerifyPage = true,                         // шалгах (QR) хуудас — зөвхөн эхний eID гарын үсэгт
     FileName = "Гэрээ №1.pdf",
     Lang = "mn",                               // mn (анхдагч) | en
+    // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = сүүлийн
+    // хуудас. Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
+    Appearance = new Appearance { X = 36, Y = 36, Width = 220, Height = 64 },
 });
 
 // 2. prepared.Dtbs (32 байт)-ийг RP backend-ээр CA-ийн signature session-д өгч утсаар зуруулна
@@ -54,7 +57,7 @@ File.WriteAllBytes("signed.pdf", done.Pdf);
 
 // 4. Бүртгэх — RP backend SDK-ийн RegisterSignature (CA POST /pdf/signatures) руу PDF биш зөвхөн мета:
 //    done.DocId, done.Cms, done.OutSha256, done.InSha256, done.HasPage, done.PageSha256, done.RevIndex,
-//    done.SigRevSha256, done.PriorCmsSha256.
+//    done.SigRevSha256, done.PriorCmsSha256 (+ done.PriorRevisionSha256 — ижил дараалал, өмнөх revision-ий SHA-256).
 ```
 
 `CompleteOptions`: `TsaUrl` (анхдагч `https://tsa.timeserver.mn/`), `Roots` (тест PKI), `HttpClient` (proxy/sandbox;
@@ -118,7 +121,8 @@ MIT — [LICENSE](LICENSE). Гуравдагч: Noto Sans (OFL 1.1), digitorus/p
 Client-side PAdES for eID Mongolia in pure C# (.NET 8). The PDF never leaves the client: `Prepare` writes the signature
 revision (optionally a bilingual verification page with a QR code) and returns the 32-byte DTBS; the citizen signs it on
 their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `CompleteAsync` verifies the signature, gets an
-RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `Completed`
+RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
+name/role, date — APPEARANCE_SPEC.md). `Completed`
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`). This is a native port of the Go
 reference (`eid-mongolia-sdk-go/pades`, profile `pades-client/1`); CI proves byte-identical output against the Go golden
 vectors on Windows and Linux. No validator is shipped — verification is a hash lookup against the CA registry, full

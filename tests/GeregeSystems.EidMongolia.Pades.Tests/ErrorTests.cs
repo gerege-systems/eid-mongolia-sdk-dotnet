@@ -71,6 +71,48 @@ public class ErrorTests
         Assert.Equal(EidPadesErrorCode.RequestInvalid, ex.Code);
     }
 
+    private static readonly Appearance Visible = new() { X = 36, Y = 36, Width = 220, Height = 64 };
+
+    public static TheoryData<string, PrepareOptions> BadAppearance() => new()
+    {
+        { "хуудас алга", Opts() with { Appearance = Visible with { Page = 2 } } },
+        { "сөрөг page", Opts() with { Appearance = Visible with { Page = -1 } } },
+        { "хуудаснаас гарна", Opts() with { Appearance = Visible with { X = 500 } } },
+        { "дээш гарна", Opts() with { Appearance = Visible with { Y = 760 } } },
+        { "нам (QR < 1 pt)", Opts() with { Appearance = Visible with { Height = 44 } } },
+        { "нарийн (бичвэр)", Opts() with { Appearance = Visible with { Width = 90 } } },
+        { "тэг өргөн", Opts() with { Appearance = Visible with { Width = 0 } } },
+        { "NaN", Opts() with { Appearance = Visible with { X = double.NaN } } },
+        { "14400-аас их", Opts() with { Appearance = Visible with { Height = 14401 } } },
+        { "хэл", Opts() with { Appearance = Visible with { Lang = "de" } } },
+        { "/Name бичигдэхгүй", Opts() with { Appearance = Visible, SignerName = "a stream b" } },
+        { "role удирдах тэмдэгт", Opts() with { Appearance = Visible, ClaimedRole = "a\u200eb" } },
+        { "role ганц surrogate", Opts() with { Appearance = Visible, ClaimedRole = "a\ud800b" } },
+    };
+
+    /// <summary>Go TestAppearanceRejects — APPEARANCE_SPEC.md §1, §3: байршил/хэмжээ буруу, багтахгүй бол REQUEST_INVALID.</summary>
+    [Theory]
+    [MemberData(nameof(BadAppearance))]
+    public void AppearanceRejects(string name, PrepareOptions o)
+    {
+        var ex = Throws(() => EidPades.Prepare(Input(), o)); // 612 × 792, 1 хуудас
+        Assert.True(ex.Code == EidPadesErrorCode.RequestInvalid, name + ": " + ex.RawCode + " " + ex.Message);
+    }
+
+    [Fact]
+    public void AppearanceMinimumAndDocIdRequired()
+    {
+        // Хамгийн бага (45 pt өндөр) хүлээн авна; харагдах нь үл харагдахаас өөр DTBS.
+        var p45 = EidPades.Prepare(Input(), Opts() with { DocId = "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d", Appearance = Visible with { Height = 45 } });
+        var inv = EidPades.Prepare(Input(), Opts() with { DocId = "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d" });
+        Assert.NotEqual(inv.Dtbs, p45.Dtbs);
+        // Гарын үсэгтэй, хуудасгүй, docId-гүй баримтад → REQUEST_INVALID (verify URL-д docId заавал).
+        var signed = Fixtures.Read("output", "quartz-pdf13-nopage.pdf");
+        var ex = Throws(() => EidPades.Prepare(signed, Opts() with { Appearance = Visible }));
+        Assert.Equal(EidPadesErrorCode.RequestInvalid, ex.Code);
+        EidPades.Prepare(signed, Opts() with { DocId = "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d", Appearance = Visible });
+    }
+
     [Fact]
     public void VerifyPageNeedsFileName()
     {
@@ -122,14 +164,15 @@ public class ErrorTests
     [InlineData(DSASignatureFormat.Rfc3279DerSequence)]
     public async Task EcdsaSignatureFormatsAreAccepted(DSASignatureFormat format)
     {
+        var now = DateTimeOffset.UtcNow; // нэг агшин — leaf.notAfter ≤ ca.notAfter (CertificateRequest.Create шалгана)
         using var caKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var caReq = new CertificateRequest("CN=TEST ONLY EC CA", caKey, HashAlgorithmName.SHA256);
         caReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         caReq.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
-        using var ca = caReq.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        using var ca = caReq.CreateSelfSigned(now.AddDays(-1), now.AddDays(1));
         using var leafKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var leafReq = new CertificateRequest("CN=TEST ONLY EC SIGNER", leafKey, HashAlgorithmName.SHA256);
-        using var leaf = leafReq.Create(ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), new byte[] { 7 });
+        using var leaf = leafReq.Create(ca, now.AddDays(-1), now.AddDays(1), new byte[] { 7 });
 
         var p = EidPades.Prepare(Input(), new PrepareOptions { SignerCert = leaf.RawData, Chain = new[] { ca.RawData } });
         var sig = leafKey.SignHash(p.Dtbs, format);

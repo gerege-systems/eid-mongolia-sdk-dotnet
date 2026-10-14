@@ -71,6 +71,15 @@ public class GoldenTests
             VerifyPage = p.TryGetProperty("verifyPage", out var vp) && vp.GetBoolean(),
             FileName = Str(p, "fileName"),
             Lang = Str(p, "lang"),
+            Appearance = p.TryGetProperty("appearance", out var ap) ? new Appearance
+            {
+                Page = ap.TryGetProperty("page", out var pg) ? pg.GetInt32() : 0,
+                X = ap.GetProperty("x").GetDouble(),
+                Y = ap.GetProperty("y").GetDouble(),
+                Width = ap.GetProperty("width").GetDouble(),
+                Height = ap.GetProperty("height").GetDouble(),
+                Lang = Str(ap, "lang"),
+            } : null,
         };
 
         PreparedDocument prep;
@@ -114,6 +123,20 @@ public class GoldenTests
         Assert.Equal(exp.TryGetProperty("hasPage", out var hp) && hp.GetBoolean(), done.HasPage);
         var prior = exp.TryGetProperty("priorCmsSha256", out var pr) ? pr.EnumerateArray().Select(x => x.GetString()!).ToArray() : Array.Empty<string>();
         Assert.Equal(prior, done.PriorCmsSha256);
+        // Өмнөх гарын үсгийн revision = тэр тохиолдлын өөрийн sigRevSha256 (Go complete.go PriorRevisionSHA256).
+        var inputRef = c.GetProperty("input").GetString()!;
+        var priorRev = inputRef.StartsWith("case:", StringComparison.Ordinal)
+            ? new[] { Str(Case(inputRef[5..]).GetProperty("expect"), "sigRevSha256")! }
+            : Array.Empty<string>();
+        Assert.Equal(priorRev, done.PriorRevisionSha256);
+    }
+
+    [Fact]
+    public void ManifestHasVisibleCases()
+    {
+        var cases = Manifest.GetProperty("cases").EnumerateArray().ToList();
+        Assert.True(cases.Count >= 17, "golden case цөөн");
+        Assert.True(cases.Count(c => c.GetProperty("prepare").TryGetProperty("appearance", out _)) >= 5, "харагдах golden case цөөн");
     }
 
     private static string Hex(byte[] b) => Convert.ToHexString(b).ToLowerInvariant();
