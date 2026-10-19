@@ -27,7 +27,7 @@ public class PlacementTests
     public static IEnumerable<object[]> VectorNames() => Vectors.EnumerateArray().Select(v => new object[] { v.GetProperty("name").GetString()! });
 
     [Fact]
-    public void VectorCount() => Assert.Equal(21, Vectors.GetArrayLength());
+    public void VectorCount() => Assert.Equal(29, Vectors.GetArrayLength());
 
     [Theory]
     [MemberData(nameof(VectorNames))]
