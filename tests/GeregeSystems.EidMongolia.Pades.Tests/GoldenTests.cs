@@ -101,6 +101,16 @@ public class GoldenTests
         Assert.Equal(exp.GetProperty("byteRange").EnumerateArray().Select(x => x.GetInt64()).ToArray(), st.ByteRange);
         Assert.Equal(Str(exp, "preparedSha256"), st.PreparedSha256);
         Assert.Equal(Str(exp, "pageSha256") ?? "", st.PageSha256);
+        // PLACEMENT_SPEC.md (golden v5): the visible stamp's final rect and status; absent for invisible signatures.
+        if (exp.TryGetProperty("placement", out var pl))
+        {
+            Assert.Equal(JsonSerializer.Deserialize<Placement>(pl.GetRawText()), prep.Placement);
+            Assert.Equal(pl.GetProperty("status").GetString(), JsonSerializer.Serialize(prep.Placement!.Status).Trim('"'));
+        }
+        else
+        {
+            Assert.Null(prep.Placement);
+        }
 
         var nonce = SHA256.HashData(Encoding.UTF8.GetBytes("golden-nonce:" + name).Append((byte)0).ToArray())[..8];
         using var http = new HttpClient(new Replay());
@@ -123,11 +133,9 @@ public class GoldenTests
         Assert.Equal(exp.TryGetProperty("hasPage", out var hp) && hp.GetBoolean(), done.HasPage);
         var prior = exp.TryGetProperty("priorCmsSha256", out var pr) ? pr.EnumerateArray().Select(x => x.GetString()!).ToArray() : Array.Empty<string>();
         Assert.Equal(prior, done.PriorCmsSha256);
-        // Өмнөх гарын үсгийн revision = тэр тохиолдлын өөрийн sigRevSha256 (Go complete.go PriorRevisionSHA256).
-        var inputRef = c.GetProperty("input").GetString()!;
-        var priorRev = inputRef.StartsWith("case:", StringComparison.Ordinal)
-            ? new[] { Str(Case(inputRef[5..]).GetProperty("expect"), "sigRevSha256")! }
-            : Array.Empty<string>();
+        // Өмнөх гарын үсгүүдийн revision = оролтын гинжийн тохиолдол бүрийн өөрийн sigRevSha256, баримтын дарааллаар
+        // (Go complete.go PriorRevisionSHA256).
+        var priorRev = PriorRevisions(c);
         Assert.Equal(priorRev, done.PriorRevisionSha256);
 
         // CA бүртгэл (Go pades.Registration): fileName state-ээр дамжина; өмнөх нь зөвхөн priorCmsSha256-аар (revision нь
@@ -145,6 +153,14 @@ public class GoldenTests
             Assert.Equal(done.RevIndex == 1 ? done.PageSha256 : null, reg.PageSha256);
             Assert.Equal("PNOMN-00000000000", reg.SignerEtsi);
         }
+    }
+
+    private static string[] PriorRevisions(JsonElement c)
+    {
+        var inputRef = c.GetProperty("input").GetString()!;
+        if (!inputRef.StartsWith("case:", StringComparison.Ordinal)) return Array.Empty<string>();
+        var prev = Case(inputRef[5..]);
+        return PriorRevisions(prev).Append(Str(prev.GetProperty("expect"), "sigRevSha256")!).ToArray();
     }
 
     [Fact]

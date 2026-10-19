@@ -158,7 +158,20 @@ public static partial class EidPades
             PreparedSha256 = PrepState.Hex(SHA256.HashData(prep.Pdf)),
         };
         foreach (var c in chain) st.Chain.Add(c.RawData);
-        return new PreparedDocument { Dtbs = Cms.Dtbs(attrs), Digest = prep.Digest, DocId = docId, State = st.Encode() };
+        Placement? placement = null;
+        if (prep.Placement is { } pl && vis is not null)
+        {
+            placement = new Placement
+            {
+                Page = vis.Page,
+                X = pl.X / 100.0,
+                Y = pl.Y / 100.0,
+                Width = vis.W / 100.0,
+                Height = vis.H / 100.0,
+                Status = pl.Status,
+            };
+        }
+        return new PreparedDocument { Dtbs = Cms.Dtbs(attrs), Digest = prep.Digest, DocId = docId, State = st.Encode(), Placement = placement };
     }
 
     /// <summary>

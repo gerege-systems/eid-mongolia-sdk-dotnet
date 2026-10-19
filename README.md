@@ -46,6 +46,7 @@ var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
     // хуудас. Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
     Appearance = new Appearance { X = 36, Y = 36, Width = 220, Height = 64 },
 });
+// prepared.Placement — харагдах гарын үсгийн эцсийн байрлал (доорх «Байршил»).
 
 // 2. prepared.Dtbs (32 байт)-ийг RP backend-ээр CA-ийн signature session-д өгч утсаар зуруулна
 //    (RAW_DIGEST_SIGNATURE), эсвэл USB токеноор (PKCS#11) локалд зурна. prepared.State-г хүлээх хооронд хадгалж болно
@@ -92,6 +93,24 @@ string body = JsonSerializer.Serialize(reg);
 | `StateInvalid` | `STATE_INVALID` | `State` эвдэрсэн (эсвэл түүний PDF-ийн бүтэц хэт гүн/төвөгтэй) |
 | `Unknown` | бусад | Шинэ код — `RawCode`-ийг үз |
 
+### Харагдах гарын үсгийн байршил
+
+`Appearance.X/Y` нь **хүссэн** байрлал. Prepare нь зорилтот хуудсыг (бичвэр, хүснэгтийн зураас, зураг, form XObject,
+өмнөх гарын үсэг зэрэг annotation-ий `/Rect`) рендергүйгээр уншаад, хүссэн тэгш өнцөгт (+4 pt) агуулгатай давхцвал
+дүрслэлийг эхний чөлөөт байрлал руу шилжүүлнэ: толин тусгал багана ижил өндөрт (баруун доод → зүүн доод), дараа нь хүссэн
+баганаар 12 pt-ээр дээш, дараа нь толин баганаар дээш. Үр дүн `prepared.Placement` (`Page`, `X`, `Y`, `Width`, `Height` —
+pt; `Status`):
+
+| `PlacementStatus` | JSON | Утга |
+|---|---|---|
+| `Requested` | `requested` | Хүссэн байрлал чөлөөтэй |
+| `Moved` | `moved` | Чөлөөт байрлал руу шилжсэн (`X`, `Y` нь шинэ байрлал) |
+| `Overlap` | `overlap` | Чөлөөт байрлал алга — хүссэн байрлалд агуулга дээгүүр зурсан |
+| `Unscanned` | `unscanned` | Хуудсыг хязгаарт багтааж уншиж чадсангүй (4 MiB, 100 000 оператор, дэмжигдээгүй шүүлтүүр…) — хүссэн байрлалд |
+
+`Overlap` / `Unscanned`-ийг хэрэглэгчид мэдэгдэх нь зүйтэй; гарын үсэг аль ч тохиолдолд хүчинтэй. Дүрэм: Go репогийн
+`pades/PLACEMENT_SPEC.md` (Go-той байт-ижил; `testdata/golden/placement/vectors.json`-оор box бүрийг тулгана).
+
 Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар (#2a/#2b бүтэц, #4 `/Encrypt` лавлагаа
 эсвэл шууд толь). `CompleteAsync`-ийн OCSP нь гэрчилгээний CertID (олгогчийн нэр/түлхүүрийн hash + serial)-тай, CRL нь
 олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол
@@ -99,14 +118,16 @@ thisUpdate ≥ одоо − 24 ц) байна.
 
 ## Хөгжүүлэлт
 
-- Профайлын дүрэм: Go репогийн `pades/PROFILE.md`, `PAGE_SPEC.md`, `PRECHECKS.md`, `WIRE.md`.
+- Профайлын дүрэм: Go репогийн `pades/PROFILE.md`, `PAGE_SPEC.md`, `PRECHECKS.md`, `WIRE.md`, `APPEARANCE_SPEC.md`,
+  `PLACEMENT_SPEC.md`.
 - Golden: `testdata/golden` = Go репогийн `pades/testdata/golden`-ийн хуулбар, `build/go-sdk.ref` commit-оос
   (`./build/sync-golden.sh`; CI `golden-sync` job нь `--check`-ээр тулгана). **Тестийн PKI-ийн хувийн түлхүүр** нь
   зөвхөн тест — бодит гинжид итгэгдэхгүй.
 - Тест (`dotnet test`): golden тохиолдол бүр Prepare → manifest-ийн гарын үсэг → CompleteAsync (HTTP fixture replay,
   тогтмол nonce/цаг) → гаралтын PDF-ийг Go-ийнхтэй **бүхэлд нь** байт-түвшинд тулгана; eid-desktop (Swift)-ийн golden;
   алдааны замууд; ECDSA (r‖s, DER); цуцлалтын дүрэм (`RevocationTests` — 04-ийн түлхүүрээр зурсан OCSP/CRL); бүтцийн
-  шалгалт (`StructureTests`, `testdata/structure` — Go/TS-ийн оролтууд).
+  шалгалт (`StructureTests`, `testdata/structure` — Go/TS-ийн оролтууд); дүрслэлийн байршил (`PlacementTests` — Go-ийн
+  `placement/vectors.json`-ийн box бүр, нэр дэвшигчдийн дараалал, эвдэрсэн content/Flate stream дээр алдаа шидэхгүй).
 - Фонт (`Assets/`): Noto Sans subset, SIL OFL 1.1 — Go reference-ийн `pades/assets/fonts`-тай ижил байт.
 - PDF уншигч/бичигч нь digitorus/pdf (BSD-3) ба digitorus/pdfsign (BSD-2)-ийн семантикийг давтана — лиценз `Pdf/LICENSE.*`.
 
@@ -131,7 +152,9 @@ Client-side PAdES for eID Mongolia in pure C# (.NET 8). The PDF never leaves the
 revision (optionally a bilingual verification page with a QR code) and returns the 32-byte DTBS; the citizen signs it on
 their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `CompleteAsync` verifies the signature, gets an
 RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
-name/role, date — APPEARANCE_SPEC.md). `Completed`
+name/role, date — APPEARANCE_SPEC.md); `X/Y` is the preferred spot — the stamp moves off existing page content to
+the first free spot and `PreparedDocument.Placement` reports where it went and why (`Requested | Moved | Overlap |
+Unscanned`, PLACEMENT_SPEC.md). `Completed`
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
 builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
 issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -105,6 +107,68 @@ public sealed record PreparedDocument
 
     /// <summary>Тунгалаг төлөв (Go reference-тэй ижил формат) — хүлээх хооронд хадгалж болно.</summary>
     public byte[] State { get; init; } = Array.Empty<byte>();
+
+    /// <summary>
+    /// Харагдах гарын үсгийн эцсийн байрлал ба шалтгаан (PLACEMENT_SPEC.md); <see cref="PrepareOptions.Appearance"/>-гүй бол
+    /// <c>null</c>. <see cref="PlacementStatus.Overlap"/> / <see cref="PlacementStatus.Unscanned"/> үед хэрэглэгчид мэдэгдэх
+    /// нь зүйтэй — гарын үсэг аль ч тохиолдолд хүчинтэй.
+    /// </summary>
+    public Placement? Placement { get; init; }
+}
+
+/// <summary>
+/// Харагдах гарын үсгийн эцсийн тэгш өнцөгт (Go <c>pades.Placement</c>): <see cref="Appearance"/>-ийн координат (pt, харагдах
+/// хуудасны зүүн доод булангаас) ба байрлалыг хэрхэн сонгосон. Дүрслэл хуудасны одоо байгаа агуулгаас (бичвэр, хүснэгт,
+/// зураг, өмнөх гарын үсэг) зайлсхийнэ (PLACEMENT_SPEC.md).
+/// </summary>
+public sealed record Placement
+{
+    /// <summary>Дүрслэл байгаа хуудас (1-ээс).</summary>
+    [JsonPropertyName("page")]
+    public int Page { get; init; }
+
+    /// <summary>Зүүн доод булангийн X (pt).</summary>
+    [JsonPropertyName("x")]
+    public double X { get; init; }
+
+    /// <summary>Зүүн доод булангийн Y (pt).</summary>
+    [JsonPropertyName("y")]
+    public double Y { get; init; }
+
+    /// <summary>Өргөн (pt).</summary>
+    [JsonPropertyName("width")]
+    public double Width { get; init; }
+
+    /// <summary>Өндөр (pt).</summary>
+    [JsonPropertyName("height")]
+    public double Height { get; init; }
+
+    /// <summary>Байрлалыг хэрхэн сонгосон (JSON: <c>requested</c> | <c>moved</c> | <c>overlap</c> | <c>unscanned</c>).</summary>
+    [JsonPropertyName("status")]
+    public PlacementStatus Status { get; init; }
+}
+
+/// <summary><see cref="Placement.Status"/> — Go <c>Placement.Status</c>-ийн утгууд (JSON-д жижиг үсгээр).</summary>
+[JsonConverter(typeof(PlacementStatusJsonConverter))]
+public enum PlacementStatus
+{
+    /// <summary><c>requested</c> — хүссэн байрлал чөлөөтэй: <see cref="Appearance.X"/>/<see cref="Appearance.Y"/>-д зурсан.</summary>
+    Requested,
+
+    /// <summary><c>moved</c> — хүссэн байрлалд агуулга байсан тул эхний чөлөөт байрлал руу шилжсэн.</summary>
+    Moved,
+
+    /// <summary><c>overlap</c> — чөлөөт байрлал алга: хүссэн байрлалд агуулга дээгүүр зурсан.</summary>
+    Overlap,
+
+    /// <summary><c>unscanned</c> — хуудсыг хязгаарт багтааж уншиж чадсангүй (хэмжээ, шүүлтүүр): хүссэн байрлалд зурсан.</summary>
+    Unscanned,
+}
+
+/// <summary><see cref="PlacementStatus"/> ↔ "requested" | "moved" | "overlap" | "unscanned".</summary>
+internal sealed class PlacementStatusJsonConverter : JsonStringEnumConverter<PlacementStatus>
+{
+    public PlacementStatusJsonConverter() : base(JsonNamingPolicy.CamelCase, allowIntegerValues: false) { }
 }
 
 /// <summary>
