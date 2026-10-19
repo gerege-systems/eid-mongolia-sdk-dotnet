@@ -19,7 +19,7 @@ namespace GeregeSystems.EidMongolia.Pades;
 /// eID client-side PAdES (профайл <c>pades-client/1</c>). PDF клиентээс гарахгүй: <see cref="Prepare"/> → 32 байт DTBS-ийг
 /// утас/токеноор зуруулах → <see cref="CompleteAsync"/> → PAdES-BASELINE-LT PDF. Go reference-тэй байт-ижил. Thread-safe.
 /// </summary>
-public static class EidPades
+public static partial class EidPades
 {
     /// <summary>PDF/CMS профайлын хувилбар.</summary>
     public const string ProfileVersion = "pades-client/1";
@@ -57,6 +57,14 @@ public static class EidPades
         ArgumentNullException.ThrowIfNull(options);
         if (pdf.Length > MaxInputBytes) throw new EidPadesException("PDF_TOO_LARGE", "PDF is larger than 9.75 MiB");
         if (!pdf.AsSpan().StartsWith("%PDF-"u8)) throw new EidPadesException("PDF_INVALID", "not a PDF or damaged");
+        try
+        {
+            Structure.Check(pdf);
+        }
+        catch (PdfStructureException e)
+        {
+            throw new EidPadesException("PDF_INVALID", "PDF structure is too deeply nested or too complex", e);
+        }
 
         X509Certificate2 cert;
         List<X509Certificate2> chain;
@@ -91,6 +99,7 @@ public static class EidPades
         byte[] baseBytes = pdf;
         string pageHex = "";
         bool hasPage = newDoc && options.VerifyPage;
+        var fileName = CleanFileName(options.FileName ?? "");
         if (!newDoc)
         {
             var fromPage = Prechecks.DocIdFromPage(pdf);
@@ -103,7 +112,7 @@ public static class EidPades
         if (newDoc && docId == "") docId = RandUuid();
         if (hasPage)
         {
-            var fileName = CleanFileName(options.FileName ?? "") ?? throw new EidPadesException("REQUEST_INVALID", "fileName is required, ≤ 120 characters");
+            if (fileName is null) throw new EidPadesException("REQUEST_INVALID", "fileName is required, ≤ 120 characters");
             try
             {
                 baseBytes = VerifyPage.Append(pdf, new PageData(PageBrand, fileName, inHex, pdf.Length, docId, PageVerifyUrl + docId, PageTrustUrl,
@@ -144,6 +153,7 @@ public static class EidPades
             HasPage = hasPage,
             PageSha256 = pageHex,
             ClaimedRole = options.ClaimedRole ?? "",
+            FileName = fileName ?? "",
             Pdf = prep.Pdf,
             PreparedSha256 = PrepState.Hex(SHA256.HashData(prep.Pdf)),
         };
@@ -177,6 +187,14 @@ public static class EidPades
         catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or ArgumentException or InvalidOperationException)
         {
             throw new EidPadesException("STATE_INVALID", "state could not be decoded", e);
+        }
+        try
+        {
+            Structure.Check(st.Pdf);
+        }
+        catch (PdfStructureException e)
+        {
+            throw new EidPadesException("STATE_INVALID", "state PDF structure is too deeply nested or too complex", e);
         }
         if (chain.Count == 0) throw new EidPadesException("STATE_INVALID", "state chain is empty");
         List<X509Certificate2> roots;
@@ -225,6 +243,10 @@ public static class EidPades
         {
             dss = await Ltv.CollectWithWaitAsync(f, Now, sleep, ts.Time, roots, cancellationToken, citizenChain, ts.Certificates).ConfigureAwait(false);
         }
+        catch (CertificateRevokedException e)
+        {
+            throw new EidPadesException("LTV_UNAVAILABLE", "certificate revoked", e);
+        }
         catch (LtvException e)
         {
             throw new EidPadesException("LTV_UNAVAILABLE", "could not collect complete OCSP/CRL data: " + e.Message, e);
@@ -252,6 +274,7 @@ public static class EidPades
             HasPage = st.HasPage,
             PageSha256 = st.PageSha256,
             SignerCert = cert.RawData,
+            FileName = st.FileName,
             RevIndex = st.RevIndex,
             SigRevSha256 = PrepState.Hex(SHA256.HashData(signed)),
             PriorCmsSha256 = prior,

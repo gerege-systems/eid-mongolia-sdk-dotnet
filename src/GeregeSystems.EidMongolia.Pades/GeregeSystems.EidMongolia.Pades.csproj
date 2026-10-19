@@ -18,7 +18,7 @@
     <PackageTags>eid;mongolia;pades;pdf;signature;etsi</PackageTags>
     <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
     <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

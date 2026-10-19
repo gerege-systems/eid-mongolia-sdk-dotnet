@@ -137,6 +137,9 @@ public sealed record Completed
     /// <summary>Гарын үсэг зурагчийн гэрчилгээ (DER).</summary>
     public byte[] SignerCert { get; init; } = Array.Empty<byte>();
 
+    /// <summary>Prepare-ийн цэвэрлэсэн баримтын нэр (CA бүртгэлийн <c>fileName</c>); өгөөгүй эсвэл буруу бол "".</summary>
+    public string FileName { get; init; } = "";
+
     /// <summary>Энэ гарын үсгийн дугаар (1…16).</summary>
     public int RevIndex { get; init; }
 
@@ -147,6 +150,8 @@ public sealed record Completed
     public IReadOnlyList<string> PriorCmsSha256 { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// CA-д ШУУД бүү илгээ — <see cref="PriorCmsSha256"/>-тэй хамт илгээвэл тоо нь revIndex − 1-ээс хэтэрч CA 400 буцаана;
+    /// <see cref="EidPades.Registration"/>-ийг ашигла (зөвхөн <c>priorCmsSha256</c>, энэ нь <c>PriorSignatures</c>-д).
     /// Өмнөх гарын үсгүүдийн revision-ий SHA-256 (баримт[0 : ByteRange төгсгөл]) — <see cref="PriorCmsSha256"/>-тэй ижил
     /// дараалал; тус бүр нь тэр гарын үсгийн өөрийн <see cref="SigRevSha256"/>-тай тэнцүү.
     /// </summary>
