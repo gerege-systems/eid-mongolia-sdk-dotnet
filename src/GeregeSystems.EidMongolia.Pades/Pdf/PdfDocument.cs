@@ -319,11 +319,7 @@ internal sealed class PdfDocument
     internal byte[] StreamBytes(PdfValue v, PdfStream s)
     {
         if (_streamData.TryGetValue(s.Ptr, out var cached) && s.Ptr != default) return cached;
-        long len = v.Key("Length").Int64;
-        long start = s.Offset;
-        long avail = Math.Max(0, _f.Length - start);
-        long n = Math.Clamp(len, 0, avail);
-        byte[] raw = _f.AsSpan((int)start, (int)n).ToArray();
+        byte[] raw = RawStreamBytes(v, s).ToArray();
 
         var filter = v.Key("Filter");
         var param = v.Key("DecodeParms");
@@ -343,6 +339,16 @@ internal sealed class PdfDocument
         }
         if (s.Ptr != default) _streamData[s.Ptr] = data;
         return data;
+    }
+
+    /// <summary>Stream-ийн тайлаагүй өгөгдөл: «stream» EOL-ийн дараах /Length байт (файлын төгсгөлөөр тасална).</summary>
+    internal ReadOnlySpan<byte> RawStreamBytes(PdfValue v, PdfStream s)
+    {
+        long len = v.Key("Length").Int64;
+        long start = s.Offset;
+        long avail = Math.Max(0, _f.Length - start);
+        long n = Math.Clamp(len, 0, avail);
+        return _f.AsSpan((int)start, (int)n);
     }
 
     private static byte[] ApplyFilter(byte[] data, string name, PdfValue param)

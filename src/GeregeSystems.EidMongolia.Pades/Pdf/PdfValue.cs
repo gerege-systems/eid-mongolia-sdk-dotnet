@@ -106,6 +106,13 @@ internal readonly struct PdfValue
         if (_data is not PdfStream s || _r is null) throw new PdfFormatException("stream not present");
         return _r.StreamBytes(this, s);
     }
+
+    /// <summary>Stream-ийн тайлаагүй (шүүлтүүрийн өмнөх) /Length байт; stream биш бол алдаа.</summary>
+    public ReadOnlySpan<byte> RawStreamBytes()
+    {
+        if (_data is not PdfStream s || _r is null) throw new PdfFormatException("stream not present");
+        return _r.RawStreamBytes(this, s);
+    }
 }
 
 internal static class PdfText

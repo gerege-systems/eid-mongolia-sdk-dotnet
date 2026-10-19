@@ -7,7 +7,8 @@ using System.Text;
 
 namespace GeregeSystems.EidMongolia.Pades.Pdf;
 
-internal sealed record PreparedRevision(byte[] Pdf, long[] ByteRange, byte[] Digest, string FieldName);
+/// <summary>Placement — the visible stamp's final position (null for an invisible signature).</summary>
+internal sealed record PreparedRevision(byte[] Pdf, long[] ByteRange, byte[] Digest, string FieldName, PlaceResult? Placement = null);
 
 /// <summary>Go reference core/signature.go — гарын үсгийн revision (placeholder), CMS суулгах.</summary>
 internal static class SignatureRevision
@@ -65,6 +66,7 @@ internal static class SignatureRevision
         // ── Талбар + widget ──
         PdfValue page;
         bool hasPage;
+        PlaceResult? placed = null;
         if (vis is null)
         {
             // Үл харагдах (digitorus createVisualSignature, invisible): эхний хуудас.
@@ -82,6 +84,9 @@ internal static class SignatureRevision
             if (!hasPage) throw new AppearanceException("хуудас " + vis.Page.ToString(CultureInfo.InvariantCulture) + " алга");
             var (box, rot) = SignatureAppearance.PageGeometry(page);
             var rect = SignatureAppearance.Rect(box, rot, vis.X, vis.Y, vis.W, vis.H);
+            // PLACEMENT_SPEC.md: move off existing page content; the requested rect stays when nothing is free.
+            placed = StampPlacement.Choose(page, box, rot, vis.X, vis.Y, vis.W, vis.H);
+            if (placed.Status == PlacementStatus.Moved) rect = SignatureAppearance.Rect(box, rot, placed.X, placed.Y, vis.W, vis.H);
             var bodies = SignatureAppearance.Objects(new AppearanceParams(vis.W, vis.H, rot, vis.Name, vis.Role, vis.Lang, vis.Date, vis.Url), apIds);
             inc.WriteObject(fieldId, SignatureAppearance.Widget(fieldName, rect, page.Ptr.Id, page.Ptr.Gen, sigId, apIds[0]));
             for (int i = 0; i < bodies.Length; i++) inc.WriteObject(apIds[i], bodies[i]);
@@ -127,7 +132,7 @@ internal static class SignatureRevision
         using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         h.AppendData(doc, 0, (int)a);
         h.AppendData(doc, (int)b, doc.Length - (int)b);
-        return new PreparedRevision(doc, br, h.GetHashAndReset(), fieldName);
+        return new PreparedRevision(doc, br, h.GetHashAndReset(), fieldName, placed);
     }
 
     private static byte[] Zeros(int n)
