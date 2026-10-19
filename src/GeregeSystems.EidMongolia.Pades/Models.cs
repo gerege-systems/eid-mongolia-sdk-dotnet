@@ -52,7 +52,10 @@ public sealed record PrepareOptions
 /// </summary>
 public sealed record Appearance
 {
-    /// <summary>Оролтын баримтын хуудас, 1-ээс; 0 = оролтын сүүлийн хуудас (энэ Prepare-ийн нэмэх verify хуудас тооцогдохгүй).</summary>
+    /// <summary>
+    /// Оролтын баримтын хуудас, 1-ээс (тодорхой дугаар — юуг ч алгасахгүй); 0 = оролтын eID verify хуудас БИШ сүүлийн
+    /// хуудас: энэ Prepare-ийн нэмэх ба өмнөх revision-уудын нэмсэн verify хуудсууд тооцогдохгүй (PLACEMENT_SPEC.md §1a).
+    /// </summary>
     public int Page { get; init; }
 
     /// <summary>Зүүн доод булангийн X (pt, 0…14400).</summary>
