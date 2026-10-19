@@ -116,7 +116,7 @@ thisUpdate ≥ одоо − 24 ц) байна.
    нэгтгээд устгана → PR → merge.
 2. main дээр `git tag v<хувилбар> && git push origin v<хувилбар>`.
 3. `.github/workflows/release.yml`: CI-г бүтнээр нь (Windows + Linux) ажиллуулж, tag = `<Version>` эсэхийг шалгаад
-   `.nupkg`-г GitHub Release asset болгон, мөн GitHub Packages (NuGet) руу нийтэлнэ.
+   `.nupkg`-г GitHub Release asset болгон, GitHub Packages (NuGet) болон nuget.org (Trusted Publishing) руу нийтэлнэ.
 
 ## Лиценз
 
