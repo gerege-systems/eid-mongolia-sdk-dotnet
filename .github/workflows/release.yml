@@ -1,11 +1,12 @@
 name: Release
-# v* tag → CI (Windows + Linux golden) → nupkg → GitHub Release asset + GitHub Packages (NuGet).
+# v* tag → CI (Windows + Linux golden) → nupkg → GitHub Release asset + GitHub Packages + nuget.org (Trusted Publishing).
 on:
   push:
     tags: ["v*"]
 permissions:
   contents: write
   packages: write
+  id-token: write # nuget.org Trusted Publishing (OIDC → богино хугацааны key)
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
@@ -33,3 +34,10 @@ jobs:
           dotnet-version: "8.0.x"
       - name: GitHub Packages
         run: dotnet nuget push "nupkg/*.nupkg" --source "https://nuget.pkg.github.com/gerege-systems/index.json" --api-key "${{ github.token }}"
+      - name: nuget.org — Trusted Publishing key
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: geregecore
+      - name: nuget.org
+        run: dotnet nuget push "nupkg/*.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --skip-duplicate
