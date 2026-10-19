@@ -19,7 +19,12 @@ internal sealed class NotFreshException : LtvException
     public NotFreshException(string message) : base(message) { }
 }
 
-/// <summary>DSS (B-LT) цуглуулалт — Go reference ltv.go: гэрчилгээ бүрийн AIA OCSP (SHA-1 CertID) ба CDP CRL, fail-closed.</summary>
+/// <summary>
+/// DSS (B-LT) цуглуулалт — Go reference ltv.go: гэрчилгээ бүрийн AIA OCSP (SHA-1 CertID) ба CDP CRL; CertID, олгогч,
+/// шинэлэг байдал (<see cref="Revocation.FreshAt"/>, одоогийн цагаар) шалгана, fail-closed. Олгогчийн гарын үсэгтэй «revoked»
+/// хариу (OCSP эсвэл CRL) — <see cref="CertificateRevokedException"/>, тэр дор нь зогсоно (өөр URL/CRL-ээр «good» хайхгүй,
+/// дахин оролдохгүй).
+/// </summary>
 internal static class Ltv
 {
     private static readonly TimeSpan OcspAfterTs = TimeSpan.FromSeconds(2);
@@ -94,7 +99,7 @@ internal static class Ltv
                 if (seen.Contains(key) || IsRoot(c)) continue;
                 seen.Add(key);
                 AddCert(c);
-                var issuer = IssuerOf(c) ?? throw new LtvException("LTV incomplete: issuer of " + c.Subject + " not found");
+                var issuer = IssuerOf(c) ?? throw new LtvException("LTV incomplete: issuer of " + Revocation.CertRef(c) + " not found");
                 bool ok = false;
                 NotFreshException? freshErr = null;
                 DateTimeOffset? fresh = i == 0 ? after : null;
@@ -136,11 +141,11 @@ internal static class Ltv
                 }
                 if (!ok)
                 {
-                    if (freshErr is not null) throw new NotFreshException(freshErr.Message + ": " + c.Subject);
-                    throw new LtvException("LTV incomplete: no valid OCSP/CRL for " + c.Subject);
+                    if (freshErr is not null) throw new NotFreshException(freshErr.Message + ": " + Revocation.CertRef(c));
+                    throw new LtvException("LTV incomplete: no valid OCSP/CRL for " + Revocation.CertRef(c));
                 }
                 if (i == 0 && freshErr is not null && ocspUrls.Count > 0 && !HasFreshOcsp(d.Ocsps, c, issuer, after))
-                    throw new NotFreshException(freshErr.Message + ": " + c.Subject);
+                    throw new NotFreshException(freshErr.Message + ": " + Revocation.CertRef(c));
             }
         }
         return d;
@@ -158,7 +163,7 @@ internal static class Ltv
         {
             try
             {
-                if (Ocsp.ParseForCert(der, c, issuer).ThisUpdate > after) return true;
+                if (Ocsp.ParseForCert(der, c, issuer).ThisUpdate > after && Revocation.OcspCertIdMatches(der, c, issuer)) return true;
             }
             catch (Exception e) when (e is FormatException or System.Formats.Asn1.AsnContentException or System.Security.Cryptography.CryptographicException)
             {
@@ -174,12 +179,18 @@ internal static class Ltv
         var der = await f.DoAsync(HttpMethod.Post, url, "application/ocsp-request", req, ct).ConfigureAwait(false);
         var resp = Ocsp.ParseForCert(der, c, issuer);
         if (!Ocsp.ResponderOk(resp, issuer)) throw new LtvException("OCSP responder EKU is not OCSPSigning");
-        if (resp.Status != OcspStatus.Good || resp.NextUpdate is { } nu && nu < now)
-            throw new LtvException("OCSP " + c.Subject + ": status " + resp.Status);
+        if (!Revocation.OcspCertIdMatches(der, c, issuer)) throw new LtvException("OCSP CertID does not match this certificate/issuer");
+        if (resp.Status == OcspStatus.Revoked) throw new CertificateRevokedException(Revocation.CertRef(c));
+        if (resp.Status != OcspStatus.Good || !Revocation.FreshAt(resp.ThisUpdate, resp.NextUpdate, now, now))
+            throw new LtvException("OCSP " + Revocation.CertRef(c) + ": status " + resp.Status);
         if (after is { } a && !(resp.ThisUpdate > a)) throw new NotFreshException("OCSP thisUpdate is not after the timestamp");
         return (der, resp);
     }
 
+    /// <summary>
+    /// Go crlCovers: der нь c-ийн олгогчийн (нэр/AKI, гарын үсэг шалгасан) CRL, nextUpdate-тэй, одоо шинэлэг, c-г агуулаагүй.
+    /// c жагсаалтад байвал <see cref="CertificateRevokedException"/>.
+    /// </summary>
     private static bool CrlCovers(byte[] der, X509Certificate2 c, X509Certificate2 issuer, DateTimeOffset now)
     {
         Crl crl;
@@ -187,15 +198,12 @@ internal static class Ltv
         {
             crl = Crl.Parse(der);
         }
-        catch (Exception e) when (e is FormatException or System.Formats.Asn1.AsnContentException)
+        catch (Exception e) when (e is FormatException or System.Formats.Asn1.AsnContentException or System.Security.Cryptography.CryptographicException)
         {
             return false;
         }
-        if (!crl.RawIssuer.AsSpan().SequenceEqual(c.IssuerName.RawData) || !X509Util.CheckCrlSignatureFrom(der, issuer)) return false;
-        if (crl.NextUpdate is not { } nu || nu < now) return false;
-        var serial = Cms.Serial(c);
-        foreach (var s in crl.Revoked)
-            if (s == serial) return false;
-        return true;
+        if (!Revocation.CrlFor(crl, c, issuer)) return false;
+        if (Revocation.CrlListed(crl, c)) throw new CertificateRevokedException(Revocation.CertRef(c));
+        return crl.NextUpdate is not null && Revocation.FreshAt(crl.ThisUpdate, crl.NextUpdate, now, now);
     }
 }

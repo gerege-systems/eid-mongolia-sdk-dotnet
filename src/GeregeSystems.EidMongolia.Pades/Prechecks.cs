@@ -4,7 +4,6 @@ using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.RegularExpressions;
 using GeregeSystems.EidMongolia.Pades.Crypto;
 using GeregeSystems.EidMongolia.Pades.Pdf;
 
@@ -14,8 +13,6 @@ namespace GeregeSystems.EidMongolia.Pades;
 internal static class Prechecks
 {
     private const string OidTimeStampToken = "1.2.840.113549.1.9.16.2.14";
-
-    private static readonly Regex EncryptKey = new(@"/Encrypt[\t\n\f\r ]+[0-9]+[\t\n\f\r ]+[0-9]+[\t\n\f\r ]+R", RegexOptions.CultureInvariant);
 
     internal sealed record SigDict(uint Obj, long[]? ByteRange, string SubFilter, string Type, string ContentsRaw);
 
@@ -70,7 +67,7 @@ internal static class Prechecks
         }
         catch (Exception e) when (IsParseError(e))
         {
-            return EncryptKey.IsMatch(Latin1.FromBytes(doc));
+            return Structure.EncryptRef.IsMatch(Latin1.FromBytes(doc));
         }
         try
         {

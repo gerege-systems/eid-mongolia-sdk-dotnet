@@ -41,6 +41,17 @@ namespace GeregeSystems.EidMongolia.Pades
         Internal,
     }
 
+    /// <summary>
+    /// <see cref="EidPades.CompleteAsync"/>: OCSP/CRL-ийн (олгогчийн гарын үсэгтэй) хариугаар гинжийн гэрчилгээ цуцлагдсан.
+    /// <c>LTV_UNAVAILABLE</c>-ийн <see cref="Exception.InnerException"/> болж ирнэ — дахин оролдох утгагүй (Go
+    /// <c>pades.ErrCertificateRevoked</c>, TS <c>CertificateRevokedError</c>). Мессежид гэрчилгээний serial (нэр биш).
+    /// </summary>
+    public sealed class CertificateRevokedException : Exception
+    {
+        /// <summary>Шинэ алдаа; <paramref name="certRef"/> — гэрчилгээний serial.</summary>
+        public CertificateRevokedException(string certRef) : base("certificate revoked: " + certRef) { }
+    }
+
     /// <summary>eID PAdES алдаа. <see cref="Code"/> тогтвортой — үүгээр салаална; <see cref="Exception.Message"/> зөвхөн лог/хүнд.</summary>
     public sealed class EidPadesException : Exception
     {

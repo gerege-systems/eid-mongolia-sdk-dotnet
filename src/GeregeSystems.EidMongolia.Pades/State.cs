@@ -26,6 +26,7 @@ internal sealed class PrepState
     public bool HasPage { get; set; }
     public string PageSha256 { get; set; } = "";
     public string ClaimedRole { get; set; } = "";
+    public string FileName { get; set; } = "";
     public string PreparedSha256 { get; set; } = "";
     public byte[] Pdf { get; set; } = Array.Empty<byte>();
 
@@ -49,6 +50,7 @@ internal sealed class PrepState
             w.WriteBoolean("hasPage", HasPage);
             if (PageSha256 != "") w.WriteString("pageSha256", PageSha256);
             if (ClaimedRole != "") w.WriteString("claimedRole", ClaimedRole);
+            if (FileName != "") w.WriteString("fileName", FileName);
             w.WriteString("preparedSha256", PreparedSha256);
             w.WriteEndObject();
         }
@@ -85,6 +87,7 @@ internal sealed class PrepState
             s.HasPage = r.TryGetProperty("hasPage", out var hp) && hp.ValueKind == JsonValueKind.True;
             s.PageSha256 = Str(r, "pageSha256");
             s.ClaimedRole = Str(r, "claimedRole");
+            s.FileName = Str(r, "fileName");
             s.PreparedSha256 = Str(r, "preparedSha256");
         }
         s.Pdf = b.AsSpan(Magic.Length + 4 + (int)n).ToArray();

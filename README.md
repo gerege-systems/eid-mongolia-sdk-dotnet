@@ -20,13 +20,13 @@ xref, CMS, TSA/OCSP/CRL хүсэлт, DSS) **байт-ижил** гаргадг�
 
 ## Суулгах
 
-Багцыг [GitHub Releases](https://github.com/gerege-systems/eid-mongolia-sdk-dotnet/releases)-ээс `.nupkg` татаж локал
-эх сурвалжаас, эсвэл GitHub Packages-ээс:
+[nuget.org](https://www.nuget.org/packages/GeregeSystems.EidMongolia.Pades)-оос:
 
 ```bash
-dotnet nuget add source https://nuget.pkg.github.com/gerege-systems/index.json -n gerege -u <github-user> -p <PAT read:packages>
-dotnet add package GeregeSystems.EidMongolia.Pades --version 0.1.0
+dotnet add package GeregeSystems.EidMongolia.Pades --version 0.3.0
 ```
+
+Хувилбар бүрийн `.nupkg` [GitHub Releases](https://github.com/gerege-systems/eid-mongolia-sdk-dotnet/releases)-д мөн бий.
 
 ## Урсгал
 
@@ -55,10 +55,15 @@ var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
 Completed done = await EidPades.CompleteAsync(prepared.State, signature, cancellationToken: ct);
 File.WriteAllBytes("signed.pdf", done.Pdf);
 
-// 4. Бүртгэх — RP backend SDK-ийн RegisterSignature (CA POST /pdf/signatures) руу PDF биш зөвхөн мета:
-//    done.DocId, done.Cms, done.OutSha256, done.InSha256, done.HasPage, done.PageSha256, done.RevIndex,
-//    done.SigRevSha256, done.PriorCmsSha256 (+ done.PriorRevisionSha256 — ижил дараалал, өмнөх revision-ий SHA-256).
+// 4. Бүртгэх — CA POST /pdf/signatures-ийн бие (PDF биш, зөвхөн мета). JSON-оор шууд илгээж болно:
+SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions { SessionId = sessionId }); // токенд SessionId-гүй
+string body = JsonSerializer.Serialize(reg);
 ```
+
+`Registration` өмнөх гарын үсгүүдийг зөвхөн `priorCmsSha256`-аар илгээнэ — `done.PriorCmsSha256` ба
+`done.PriorRevisionSha256`-г **хоёуланг нь** бүтнээр илгээвэл CA 400 буцаана. Өмнөх гарын үсэг CA-д угсарсан (горим A)
+байвал CA 409 `PRIOR_MISMATCH` буцаана: `reg.PriorSignatures`-ийн эхний k-гийн `RevisionSha256`-г `PriorRevisionSha256`-д,
+үлдсэний `CmsSha256`-г `PriorCmsSha256`-д тавьж дахин илгээнэ (Go/TS SDK-ийн `RegisterSignature` үүнийг өөрөө хийдэг).
 
 `CompleteOptions`: `TsaUrl` (анхдагч `https://tsa.timeserver.mn/`), `Roots` (тест PKI), `HttpClient` (proxy/sandbox;
 анхдагч нь timeout 10 с, redirect дагахгүй), `TimeProvider`. Үндэсний CRL (`esign.gov.mn`)-ийг eID-ийн https толин
@@ -70,7 +75,7 @@ File.WriteAllBytes("signed.pdf", done.Pdf);
 
 | `Code` | Код | Утга |
 |---|---|---|
-| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй |
+| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй; бүтэц хэт гүн (давхарлалт > 256) эсвэл ObjStm/xref мөчлөг, `/Size` > 2^21 |
 | `PdfEncrypted` | `PDF_ENCRYPTED` | Шифрлэгдсэн PDF |
 | `PdfLocked` | `PDF_LOCKED` | DocMDP P=1 — өөрчлөхийг хориглосон |
 | `PdfTooLarge` | `PDF_TOO_LARGE` | 9.75 MiB (оролт) / 10 MiB (гаралт)-аас их |
@@ -81,13 +86,16 @@ File.WriteAllBytes("signed.pdf", done.Pdf);
 | `RequestInvalid` | `REQUEST_INVALID` | Сонголт буруу (docId, lang, fileName, claimedRole…) |
 | `SignatureInvalid` | `SIGNATURE_INVALID` | Гарын үсэг DTBS / SignerCert-тэй таарахгүй |
 | `TsaUnavailable` | `TSA_UNAVAILABLE` | TSA хариу өгсөнгүй / token хүчингүй |
-| `LtvUnavailable` | `LTV_UNAVAILABLE` | OCSP/CRL бүрэн авч чадсангүй |
+| `LtvUnavailable` | `LTV_UNAVAILABLE` | OCSP/CRL бүрэн авч чадсангүй; `InnerException is CertificateRevokedException` бол гинжийн гэрчилгээ цуцлагдсан — дахин оролдохгүй |
 | `SelfValidationFailed` | `SELF_VALIDATION_FAILED` | Гаралт өөрийн шалгалтыг давсангүй |
 | `PlaceholderOverflow` | `PLACEHOLDER_OVERFLOW` | CMS placeholder-т багтсангүй |
-| `StateInvalid` | `STATE_INVALID` | `State` эвдэрсэн |
+| `StateInvalid` | `STATE_INVALID` | `State` эвдэрсэн (эсвэл түүний PDF-ийн бүтэц хэт гүн/төвөгтэй) |
 | `Unknown` | бусад | Шинэ код — `RawCode`-ийг үз |
 
-Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар.
+Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар (#2a/#2b бүтэц, #4 `/Encrypt` лавлагаа
+эсвэл шууд толь). `CompleteAsync`-ийн OCSP нь гэрчилгээний CertID (олгогчийн нэр/түлхүүрийн hash + serial)-тай, CRL нь
+олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол
+thisUpdate ≥ одоо − 24 ц) байна.
 
 ## Хөгжүүлэлт
 
@@ -97,7 +105,8 @@ Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md
   зөвхөн тест — бодит гинжид итгэгдэхгүй.
 - Тест (`dotnet test`): golden тохиолдол бүр Prepare → manifest-ийн гарын үсэг → CompleteAsync (HTTP fixture replay,
   тогтмол nonce/цаг) → гаралтын PDF-ийг Go-ийнхтэй **бүхэлд нь** байт-түвшинд тулгана; eid-desktop (Swift)-ийн golden;
-  алдааны замууд; ECDSA (r‖s, DER).
+  алдааны замууд; ECDSA (r‖s, DER); цуцлалтын дүрэм (`RevocationTests` — 04-ийн түлхүүрээр зурсан OCSP/CRL); бүтцийн
+  шалгалт (`StructureTests`, `testdata/structure` — Go/TS-ийн оролтууд).
 - Фонт (`Assets/`): Noto Sans subset, SIL OFL 1.1 — Go reference-ийн `pades/assets/fonts`-тай ижил байт.
 - PDF уншигч/бичигч нь digitorus/pdf (BSD-3) ба digitorus/pdfsign (BSD-2)-ийн семантикийг давтана — лиценз `Pdf/LICENSE.*`.
 
@@ -123,7 +132,10 @@ revision (optionally a bilingual verification page with a QR code) and returns t
 their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `CompleteAsync` verifies the signature, gets an
 RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
 name/role, date — APPEARANCE_SPEC.md). `Completed`
-carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`). This is a native port of the Go
+carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
+builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
+issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is
+`CertificateRevokedException` (do not retry). Install: `dotnet add package GeregeSystems.EidMongolia.Pades` (nuget.org). This is a native port of the Go
 reference (`eid-mongolia-sdk-go/pades`, profile `pades-client/1`); CI proves byte-identical output against the Go golden
 vectors on Windows and Linux. No validator is shipped — verification is a hash lookup against the CA registry, full
 cryptographic validation lives in the Go backend SDK. Errors are `EidPadesException` with a stable `Code`.

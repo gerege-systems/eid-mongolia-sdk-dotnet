@@ -129,6 +129,22 @@ public class GoldenTests
             ? new[] { Str(Case(inputRef[5..]).GetProperty("expect"), "sigRevSha256")! }
             : Array.Empty<string>();
         Assert.Equal(priorRev, done.PriorRevisionSha256);
+
+        // CA бүртгэл (Go pades.Registration): fileName state-ээр дамжина; өмнөх нь зөвхөн priorCmsSha256-аар (revision нь
+        // PriorSignatures-д, JSON-д орохгүй — хоёуланг нь бүтнээр илгээвэл CA 400).
+        Assert.Equal(EidPades.CleanFileName(Str(p, "fileName") ?? "") ?? "", done.FileName);
+        if (done.FileName != "" && (done.RevIndex > 1 || done.HasPage))
+        {
+            var reg = EidPades.Registration(done, new RegistrationOptions { SessionId = "s1" });
+            var json = JsonSerializer.Serialize(reg);
+            Assert.DoesNotContain("priorRevisionSha256", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("PriorSignatures", json, StringComparison.Ordinal);
+            Assert.Contains("\"medium\":\"phone\"", json, StringComparison.Ordinal);
+            Assert.Equal(prior.Length > 0 ? prior : null, reg.PriorCmsSha256?.ToArray());
+            Assert.Equal(priorRev, reg.PriorSignatures.Select(x => x.RevisionSha256).ToArray());
+            Assert.Equal(done.RevIndex == 1 ? done.PageSha256 : null, reg.PageSha256);
+            Assert.Equal("PNOMN-00000000000", reg.SignerEtsi);
+        }
     }
 
     [Fact]

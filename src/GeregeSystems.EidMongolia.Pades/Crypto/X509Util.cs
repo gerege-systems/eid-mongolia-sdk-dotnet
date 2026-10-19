@@ -246,7 +246,12 @@ internal sealed class Crl
 {
     public byte[] Der { get; private init; } = Array.Empty<byte>();
     public byte[] RawIssuer { get; private init; } = Array.Empty<byte>();
+    public DateTimeOffset ThisUpdate { get; private init; }
     public DateTimeOffset? NextUpdate { get; private init; }
+
+    /// <summary>authorityKeyIdentifier-ийн keyIdentifier (хоосон — байхгүй).</summary>
+    public byte[] AuthorityKeyId { get; private set; } = Array.Empty<byte>();
+
     public List<BigInteger> Revoked { get; } = new();
 
     public static Crl Parse(byte[] der)
@@ -258,11 +263,11 @@ internal sealed class Crl
         if (tbs.PeekTag().HasSameClassAndValue(Asn1Tag.Integer)) tbs.ReadInteger();
         AlgorithmId.Read(tbs);
         var issuer = tbs.ReadEncodedValue().ToArray();
-        X509Util.ReadTime(tbs);
+        var thisUpdate = X509Util.ReadTime(tbs);
         DateTimeOffset? next = null;
         if (tbs.HasData && (tbs.PeekTag().HasSameClassAndValue(Asn1Tag.UtcTime) || tbs.PeekTag().HasSameClassAndValue(Asn1Tag.GeneralizedTime)))
             next = X509Util.ReadTime(tbs);
-        var crl = new Crl { Der = der, RawIssuer = issuer, NextUpdate = next };
+        var crl = new Crl { Der = der, RawIssuer = issuer, ThisUpdate = thisUpdate, NextUpdate = next };
         if (tbs.HasData && tbs.PeekTag().HasSameClassAndValue(Asn1Tag.Sequence))
         {
             var rev = tbs.ReadSequence();
@@ -270,6 +275,21 @@ internal sealed class Crl
             {
                 var e = rev.ReadSequence();
                 crl.Revoked.Add(e.ReadInteger());
+            }
+        }
+        var ctx0 = new Asn1Tag(TagClass.ContextSpecific, 0);
+        if (tbs.HasData && tbs.PeekTag().HasSameClassAndValue(ctx0))
+        {
+            var exts = tbs.ReadSequence(ctx0).ReadSequence();
+            while (exts.HasData)
+            {
+                var ext = exts.ReadSequence();
+                var oid = ext.ReadObjectIdentifier();
+                if (ext.PeekTag().HasSameClassAndValue(Asn1Tag.Boolean)) ext.ReadBoolean();
+                var val = ext.ReadOctetString();
+                if (oid != "2.5.29.35") continue;
+                var aki = new AsnReader(val, AsnEncodingRules.DER).ReadSequence();
+                if (aki.HasData && aki.PeekTag().HasSameClassAndValue(ctx0)) crl.AuthorityKeyId = aki.ReadOctetString(ctx0);
             }
         }
         return crl;
