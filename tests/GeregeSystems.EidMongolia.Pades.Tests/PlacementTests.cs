@@ -29,6 +29,28 @@ public class PlacementTests
     [Fact]
     public void VectorCount() => Assert.Equal(29, Vectors.GetArrayLength());
 
+    /// <summary>Go TestDefaultStampPage (PLACEMENT_SPEC.md §1a): page 0 skips this document's own verify pages only.</summary>
+    [Theory]
+    [InlineData("two-verify.pdf", "f5a6b7c8-d9e0-4f1a-8b2c-3d4e5f607182", 1, 3)] // 1 content + 2 verify pages
+    [InlineData("two-verify.pdf", "a6b7c8d9-e0f1-4a2b-9c3d-4e5f60718293", 3, 3)] // another docId → nothing skipped
+    [InlineData("fake-verify.pdf", "f5a6b7c8-d9e0-4f1a-8b2c-3d4e5f607182", 2, 2)] // other docId + /rev link → content
+    [InlineData("quartz-pdf13.pdf", "6f0c2b9e-3a1d-4c55-9b7e-0a1b2c3d4e5f", 1, 1)] // no verify page
+    public void DefaultStampPage(string input, string docId, int page, int n)
+    {
+        var (gotPage, gotN) = SignatureAppearance.DefaultStampPage(Fixtures.Read("input", input), "https://ca.eidmongolia.mn/verify/" + docId);
+        Assert.Equal((page, n), (gotPage, gotN));
+    }
+
+    /// <summary>The first signature's output: content page + its verify page → page 1; every page a verify page → the last.</summary>
+    [Fact]
+    public void DefaultStampPageAfterFirstSignature()
+    {
+        var doc = Fixtures.Read("output", "quartz-pdf13.pdf");
+        Assert.Equal((1, 2), SignatureAppearance.DefaultStampPage(doc, "https://ca.eidmongolia.mn/verify/6f0c2b9e-3a1d-4c55-9b7e-0a1b2c3d4e5f"));
+        var both = Fixtures.Read("output", "page0-two-verify.pdf");
+        Assert.Equal((1, 3), SignatureAppearance.DefaultStampPage(both, "https://ca.eidmongolia.mn/verify/f5a6b7c8-d9e0-4f1a-8b2c-3d4e5f607182"));
+    }
+
     [Theory]
     [MemberData(nameof(VectorNames))]
     public void MatchesGoVector(string name)

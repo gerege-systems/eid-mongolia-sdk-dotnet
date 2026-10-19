@@ -347,21 +347,22 @@ public static partial class EidPades
         return true;
     }
 
-    /// <summary>Go visibleSpec: хуудас (0 → оролтын сүүлийн), h100, хэл, огноо (+08), verify URL.</summary>
+    /// <summary>Go visibleSpec: хуудас (0 → eID verify биш сүүлийн, PLACEMENT_SPEC §1a), h100, хэл, огноо (+08), verify URL.</summary>
     private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex)
     {
         var a = o.Appearance!;
         if (docId == "") throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас алга)");
-        int n;
+        // page 0 / байхгүй = eID verify хуудас БИШ сүүлийн хуудас (PLACEMENT_SPEC §1a); тодорхой дугаар хэвээр.
+        int n, last;
         try
         {
-            n = SignatureAppearance.PageCount(doc);
+            (last, n) = SignatureAppearance.DefaultStampPage(doc, PageVerifyUrl + docId);
         }
         catch (Exception e) when (Prechecks.IsParseError(e))
         {
             throw new EidPadesException("PDF_INVALID", "not a PDF or damaged", e);
         }
-        int page = a.Page == 0 ? n : a.Page;
+        int page = a.Page == 0 ? last : a.Page;
         if (page > n)
             throw new EidPadesException("REQUEST_INVALID", string.Create(CultureInfo.InvariantCulture, $"appearance: page {page} > хуудасны тоо {n}"));
         var lang = !string.IsNullOrEmpty(a.Lang) ? a.Lang : !string.IsNullOrEmpty(o.Lang) ? o.Lang : "mn";

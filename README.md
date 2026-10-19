@@ -42,8 +42,8 @@ var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
     VerifyPage = true,                         // шалгах (QR) хуудас — зөвхөн эхний eID гарын үсэгт
     FileName = "Гэрээ №1.pdf",
     Lang = "mn",                               // mn (анхдагч) | en
-    // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = сүүлийн
-    // хуудас. Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
+    // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = eID verify
+    // хуудас биш сүүлийн хуудас (PLACEMENT_SPEC §1a). Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
     Appearance = new Appearance { X = 36, Y = 36, Width = 220, Height = 64 },
 });
 // prepared.Placement — харагдах гарын үсгийн эцсийн байрлал (доорх «Байршил»).
@@ -154,7 +154,8 @@ their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `Comple
 RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
 name/role, date — APPEARANCE_SPEC.md); `X/Y` is the preferred spot — the stamp moves off existing page content to
 the first free spot and `PreparedDocument.Placement` reports where it went and why (`Requested | Moved | Overlap |
-Unscanned`, PLACEMENT_SPEC.md). `Completed`
+Unscanned`, PLACEMENT_SPEC.md). `Appearance.Page` 0 = the last page that is not an eID verify page (earlier revisions'
+verify pages — a `/Link` to `https://ca.eidmongolia.mn/verify/<docId>` — are skipped; PLACEMENT_SPEC §1a). `Completed`
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
 builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
 issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is

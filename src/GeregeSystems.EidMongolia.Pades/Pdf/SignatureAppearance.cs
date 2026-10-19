@@ -261,6 +261,64 @@ internal static class SignatureAppearance
         return Walk(root, 0);
     }
 
+    /// <summary>
+    /// Go core.DefaultStampPage (PLACEMENT_SPEC.md §1a): <c>appearance.page</c> 0 үеийн хуудас — баримтын (модны
+    /// дарааллаар) eID verify хуудас БИШ сүүлийн хуудас (1-ээс) ба хуудасны тоо. Verify хуудас = /Annots-д
+    /// <c>/Subtype /Link</c>, <c>/A &lt;&lt; /S /URI /URI verifyUri &gt;&gt;</c> annotation-тай (байт-ижил). Бүх хуудас verify
+    /// бол сүүлийнх. Хуудсыг уншиж чадахгүй бол агуулгын хуудас.
+    /// </summary>
+    public static (int Page, int N) DefaultStampPage(byte[] doc, string verifyUri)
+    {
+        var inc = Incremental.Open(doc);
+        var pages = new List<PdfValue>();
+        void Walk(PdfValue v, int depth)
+        {
+            if (depth > MaxDepth || pages.Count > 1 << 16) return;
+            switch (v.Key("Type").Name)
+            {
+                case "Page":
+                    pages.Add(v);
+                    break;
+                case "Pages":
+                    var kids = v.Key("Kids");
+                    for (int i = 0; i < kids.Len; i++) Walk(kids.Index(i), depth + 1);
+                    break;
+            }
+        }
+        Walk(inc.Root.Key("Pages"), 0);
+        int n = pages.Count;
+        for (int i = n - 1; i >= 0; i--)
+            if (!IsVerifyPage(pages[i], verifyUri)) return (i + 1, n);
+        return (n, n);
+    }
+
+    /// <summary>Go isVerifyPage-ийн уншиx /Annots-ийн дээд тоо (PLACEMENT_SPEC §3.7-тэй ижил).</summary>
+    private const int MaxVerifyAnnots = 10000;
+
+    /// <summary>Go isVerifyPage: хуудсын /Annots-д verifyUri руу заасан Link байгаа эсэх. Уншиж чадахгүй → false.</summary>
+    internal static bool IsVerifyPage(PdfValue page, string verifyUri)
+    {
+        try
+        {
+            var annots = page.Key("Annots");
+            if (annots.Kind != PdfKind.Array) return false;
+            int m = Math.Min(annots.Len, MaxVerifyAnnots);
+            for (int i = 0; i < m; i++)
+            {
+                var a = annots.Index(i);
+                if (a.Kind != PdfKind.Dict || a.Key("Subtype").Name != "Link") continue;
+                var act = a.Key("A");
+                if (act.Kind == PdfKind.Dict && act.Key("S").Name == "URI" && act.Key("URI").Kind == PdfKind.String &&
+                    string.Equals(act.Key("URI").RawString, verifyUri, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+        catch (Exception e) when (Prechecks.IsParseError(e))
+        {
+        }
+        return false;
+    }
+
     /// <summary>Баримтын /Pages модны /Page объектын тоо (модыг тоолно, /Count-д итгэхгүй).</summary>
     public static int PageCount(byte[] doc)
     {
