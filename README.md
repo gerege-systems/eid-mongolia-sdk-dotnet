@@ -66,6 +66,10 @@ SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions
 string body = JsonSerializer.Serialize(reg);
 ```
 
+`Medium` хоосон бол `SessionId`-ээс тооцно (байвал `phone`, үгүй бол `token` — CA-ийн дүрэм phone ⇔ sessionID).
+`Registration` CA-ийн өмнө шууд `REQUEST_INVALID` шиднэ: `phone` + `SessionId`-гүй, `token` + `SessionId`, бусад
+`Medium` утга, эсвэл `done.ClaimedRole` (Prepare-ийн `ClaimedRole`) байхад `OnBehalfOf` хоосон.
+
 `Registration` өмнөх гарын үсгүүдийг зөвхөн `priorCmsSha256`-аар илгээнэ — `done.PriorCmsSha256` ба
 `done.PriorRevisionSha256`-г **хоёуланг нь** бүтнээр илгээвэл CA 400 буцаана. Өмнөх гарын үсэг CA-д угсарсан (горим A)
 байвал CA 409 `PRIOR_MISMATCH` буцаана: `reg.PriorSignatures`-ийн эхний k-гийн `RevisionSha256`-г `PriorRevisionSha256`-д,

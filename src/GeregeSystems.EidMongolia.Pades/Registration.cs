@@ -8,13 +8,16 @@ namespace GeregeSystems.EidMongolia.Pades;
 /// <summary><see cref="EidPades.Registration"/>-ийн <see cref="Completed"/>-ээс гадуурх утгууд (Go <c>pades.RegistrationOptions</c>).</summary>
 public sealed record RegistrationOptions
 {
-    /// <summary><c>phone</c> | <c>token</c>. <c>null</c> = <see cref="SessionId"/> байвал phone, эс бөгөөс token.</summary>
+    /// <summary>
+    /// <c>phone</c> | <c>token</c>. <c>null</c>/"" = <see cref="SessionId"/> байвал phone, эс бөгөөс token (CA-ийн дүрэм:
+    /// phone ⇔ sessionID). phone + SessionId-гүй, token + SessionId, бусад утга → REQUEST_INVALID.
+    /// </summary>
     public string? Medium { get; init; }
 
     /// <summary>Утсанд заавал: DTBS-ийг зурсан RAW_DIGEST_SIGNATURE session.</summary>
     public string? SessionId { get; init; }
 
-    /// <summary>NTRMN-… (<see cref="PrepareOptions.ClaimedRole"/> өгсөн бол заавал).</summary>
+    /// <summary>NTRMN-… (<see cref="PrepareOptions.ClaimedRole"/> өгсөн бол заавал — үгүй бол REQUEST_INVALID).</summary>
     public string? OnBehalfOf { get; init; }
 }
 
@@ -111,7 +114,10 @@ public static partial class EidPades
     /// өмнөх гарын үсгүүдийг зөвхөн <c>priorCmsSha256</c>-аар (revision-ийг <see cref="SignatureRegistration.PriorSignatures"/>-д)
     /// — хоёр жагсаалтыг хоёуланг нь бүтнээр илгээвэл CA 400 буцаадаг.
     /// </summary>
-    /// <exception cref="EidPadesException">REQUEST_INVALID — эхний гарын үсэг хуудасгүй эсвэл fileName хоосон.</exception>
+    /// <exception cref="EidPadesException">
+    /// REQUEST_INVALID — эхний гарын үсэг хуудасгүй, fileName хоосон, medium буруу / sessionId-тэй зөрсөн (phone ⇔ sessionId),
+    /// эсвэл <see cref="Completed.ClaimedRole"/> байхад <see cref="RegistrationOptions.OnBehalfOf"/> хоосон.
+    /// </exception>
     public static SignatureRegistration Registration(Completed completed, RegistrationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(completed);
@@ -119,6 +125,16 @@ public static partial class EidPades
         if (completed.RevIndex == 1 && !completed.HasPage)
             throw new EidPadesException("REQUEST_INVALID", "the first signature must carry the verification page (PrepareOptions.VerifyPage)");
         if (completed.FileName == "") throw new EidPadesException("REQUEST_INVALID", "fileName is empty (PrepareOptions.FileName)");
+        var hasSession = !string.IsNullOrEmpty(o.SessionId);
+        var medium = string.IsNullOrEmpty(o.Medium) ? hasSession ? "phone" : "token" : o.Medium;
+        if (medium != "phone" && medium != "token")
+            throw new EidPadesException("REQUEST_INVALID", "medium must be phone or token");
+        if (medium == "phone" && !hasSession)
+            throw new EidPadesException("REQUEST_INVALID", "medium phone requires SessionId (the RAW_DIGEST_SIGNATURE session)");
+        if (medium == "token" && hasSession)
+            throw new EidPadesException("REQUEST_INVALID", "medium token takes no SessionId");
+        if (completed.ClaimedRole != "" && string.IsNullOrEmpty(o.OnBehalfOf))
+            throw new EidPadesException("REQUEST_INVALID", "claimedRole requires onBehalfOf (NTRMN-…)");
         var prior = new List<PriorSignature>();
         if (completed.PriorRevisionSha256.Count == completed.PriorCmsSha256.Count)
             for (int i = 0; i < completed.PriorCmsSha256.Count; i++)
@@ -136,7 +152,7 @@ public static partial class EidPades
         {
             DocId = completed.DocId,
             RevIndex = completed.RevIndex,
-            Medium = string.IsNullOrEmpty(o.Medium) ? string.IsNullOrEmpty(o.SessionId) ? "token" : "phone" : o.Medium,
+            Medium = medium,
             SessionId = string.IsNullOrEmpty(o.SessionId) ? null : o.SessionId,
             Cms = completed.Cms,
             FileName = completed.FileName,

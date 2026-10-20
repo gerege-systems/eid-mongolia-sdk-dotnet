@@ -141,9 +141,11 @@ public class GoldenTests
         // CA бүртгэл (Go pades.Registration): fileName state-ээр дамжина; өмнөх нь зөвхөн priorCmsSha256-аар (revision нь
         // PriorSignatures-д, JSON-д орохгүй — хоёуланг нь бүтнээр илгээвэл CA 400).
         Assert.Equal(EidPades.CleanFileName(Str(p, "fileName") ?? "") ?? "", done.FileName);
+        Assert.Equal(Str(p, "claimedRole") ?? "", done.ClaimedRole);
         if (done.FileName != "" && (done.RevIndex > 1 || done.HasPage))
         {
-            var reg = EidPades.Registration(done, new RegistrationOptions { SessionId = "s1" });
+            var obo = done.ClaimedRole != "" ? "NTRMN-1234567" : null;
+            var reg = EidPades.Registration(done, new RegistrationOptions { SessionId = "s1", OnBehalfOf = obo });
             var json = JsonSerializer.Serialize(reg);
             Assert.DoesNotContain("priorRevisionSha256", json, StringComparison.Ordinal);
             Assert.DoesNotContain("PriorSignatures", json, StringComparison.Ordinal);

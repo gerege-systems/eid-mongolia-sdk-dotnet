@@ -223,4 +223,10 @@ public sealed record Completed
     /// дараалал; тус бүр нь тэр гарын үсгийн өөрийн <see cref="SigRevSha256"/>-тай тэнцүү.
     /// </summary>
     public IReadOnlyList<string> PriorRevisionSha256 { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Prepare-ийн <see cref="PrepareOptions.ClaimedRole"/> (signer-attributes-v2); байхгүй бол "". Байвал
+    /// <see cref="EidPades.Registration"/>-д <see cref="RegistrationOptions.OnBehalfOf"/> заавал.
+    /// </summary>
+    public string ClaimedRole { get; init; } = "";
 }

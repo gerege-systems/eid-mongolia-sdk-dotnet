@@ -158,6 +158,58 @@ public class ErrorTests
         Assert.Equal(EidPadesErrorCode.TsaUnavailable, ex.Code);
     }
 
+    /// <summary>RSASSA-PSS гарын үсэг (PAdES-д PKCS#1 v1.5 шаардлагатай) → SIGNATURE_INVALID, Go/TS/Swift/Kotlin-той ижил.</summary>
+    [Fact]
+    public async Task CompleteRejectsPssSignature()
+    {
+        var p = EidPades.Prepare(Input(), Opts());
+        using var key = RSA.Create();
+        key.ImportFromPem(File.ReadAllText(Path.Combine(Fixtures.Golden, "pki", "citizen.key.pem")));
+        var sig = key.SignHash(p.Dtbs, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        using var http = new HttpClient(new Down());
+        var ex = await Assert.ThrowsAsync<EidPadesException>(() =>
+            EidPades.CompleteAsync(p.State, sig, new CompleteOptions { HttpClient = http, TsaUrl = "http://tsa.pki.test/" }));
+        Assert.Equal(EidPadesErrorCode.SignatureInvalid, ex.Code);
+    }
+
+    private static Completed Done(string claimedRole = "") => new()
+    {
+        DocId = "4e5f6071-8293-4a4b-8bce-3f4a5b6c7d8e",
+        RevIndex = 2,
+        FileName = "a.pdf",
+        SignerCert = Pem("citizen.pem"),
+        PriorCmsSha256 = new[] { new string('a', 64) },
+        ClaimedRole = claimedRole,
+    };
+
+    /// <summary>medium: хоосон бол sessionId-ээс (phone ⇔ sessionId, CA-ийн дүрэм); зөрвөл REQUEST_INVALID.</summary>
+    [Theory]
+    [InlineData(null, "s1", "phone")]
+    [InlineData("", null, "token")]
+    [InlineData("phone", "s1", "phone")]
+    [InlineData("token", null, "token")]
+    public void RegistrationInfersMedium(string? medium, string? sessionId, string want) =>
+        Assert.Equal(want, EidPades.Registration(Done(), new RegistrationOptions { Medium = medium, SessionId = sessionId }).Medium);
+
+    [Theory]
+    [InlineData("phone", null)]
+    [InlineData("token", "s1")]
+    [InlineData("usb", null)]
+    public void RegistrationRejectsMediumMismatch(string medium, string? sessionId)
+    {
+        var ex = Throws(() => EidPades.Registration(Done(), new RegistrationOptions { Medium = medium, SessionId = sessionId }));
+        Assert.Equal(EidPadesErrorCode.RequestInvalid, ex.Code);
+    }
+
+    [Fact]
+    public void RegistrationClaimedRoleNeedsOnBehalfOf()
+    {
+        var ex = Throws(() => EidPades.Registration(Done("Захирал"), new RegistrationOptions { SessionId = "s1" }));
+        Assert.Equal(EidPadesErrorCode.RequestInvalid, ex.Code);
+        var reg = EidPades.Registration(Done("Захирал"), new RegistrationOptions { SessionId = "s1", OnBehalfOf = "NTRMN-1234567" });
+        Assert.Equal("NTRMN-1234567", reg.OnBehalfOf);
+    }
+
     /// <summary>ECDSA P-256 иргэн: r‖s ба DER гарын үсэг хоёулаа DTBS-ийн шалгалтыг давж TSA алхамд хүрнэ.</summary>
     [Theory]
     [InlineData(DSASignatureFormat.IeeeP1363FixedFieldConcatenation)]
