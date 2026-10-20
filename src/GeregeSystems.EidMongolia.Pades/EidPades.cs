@@ -292,6 +292,7 @@ public static partial class EidPades
             SigRevSha256 = PrepState.Hex(SHA256.HashData(signed)),
             PriorCmsSha256 = prior,
             PriorRevisionSha256 = priorRev,
+            ClaimedRole = st.ClaimedRole,
         };
     }
 
