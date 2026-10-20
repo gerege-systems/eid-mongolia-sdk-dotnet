@@ -2,6 +2,30 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.6.0 — 2026-10-20
+
+### Fixed — `Registration`: medium ба claimedRole-ийг CA-аас өмнө шалгана
+
+- **Юу:** `EidPades.Registration` — `Medium` хоосон бол `SessionId`-ээс тооцсоор (phone ⇔ sessionId); `phone` +
+  `SessionId`-гүй, `token` + `SessionId`, бусад `Medium` утга → `REQUEST_INVALID`. `Completed.ClaimedRole` (шинэ;
+  state-ээс) байхад `RegistrationOptions.OnBehalfOf` хоосон бол `REQUEST_INVALID`.
+- **Яагаад:** 2026-10-20-ны SDK аудит — таван SDK (TS, Go, .NET, Swift, Kotlin) нэг дүрмээр; CA эдгээрийг хожим 400-аар
+  татгалздаг байсан.
+- **Хаана:** `src/GeregeSystems.EidMongolia.Pades/Registration.cs`, `Models.cs` (`Completed.ClaimedRole`), `EidPades.cs`,
+  `README.md`; тест `ErrorTests.cs` (medium, claimedRole, RSASSA-PSS → `SIGNATURE_INVALID`), `GoldenTests.cs`.
+- **Шалгасан:** CI `dotnet test` (Windows + Linux).
+
+### Docs — README / XML doc нь 0.5.0-ийн API-тай нийцэв
+
+- **Юу:** README-ийн жишээнд `using System.Text.Json;` дутуу байсан (`JsonSerializer` compile болдоггүй); `ClaimedRole`
+  тавьсан жишээ `RegistrationOptions.OnBehalfOf`-гүй байсан (CA-д заавал). Алдааны хүснэгтэд `Internal` / `INTERNAL`
+  нэмэв; `PDF_INVALID`-ийн бүтцийн хязгаарыг PRECHECKS #2a/#2b-тэй тулгав (`/Extends` > 64). XML doc:
+  `PrepareOptions.Lang` хоосон = `mn`.
+- **Яагаад:** Swift/Kotlin/Go баримттай нийцүүлэх аудит (2026-10-20); код өөрчлөгдөөгүй.
+- **Хаана:** `README.md`, `src/GeregeSystems.EidMongolia.Pades/Models.cs` (зөвхөн `///`).
+- **Шалгасан:** README-ийн урсгалын жишээг scratch console төсөлд (`ProjectReference` → src) `dotnet build` — алдаагүй;
+  засвараас өмнө `CS0103 JsonSerializer`.
+
 ## 0.5.0 — 2026-10-19
 
 ### Changed — `Appearance.Page` 0 = the last page that is not an eID verify page (golden v6)
