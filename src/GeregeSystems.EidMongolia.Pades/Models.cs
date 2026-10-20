@@ -38,7 +38,7 @@ public sealed record PrepareOptions
     /// <summary>Хуудсанд харуулах файлын нэр (<see cref="VerifyPage"/> үед заавал, ≤ 120 тэмдэгт).</summary>
     public string? FileName { get; init; }
 
-    /// <summary>Хуудасны хэл: <c>mn</c> | <c>en</c>.</summary>
+    /// <summary>Хуудасны хэл: <c>mn</c> | <c>en</c>; <c>null</c>/хоосон = <c>mn</c>.</summary>
     public string? Lang { get; init; }
 
     /// <summary>Харагдах гарын үсэг (APPEARANCE_SPEC.md). <c>null</c> = үл харагдах (анхдагч, өмнөхтэй байт-ижил).</summary>

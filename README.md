@@ -31,6 +31,7 @@ dotnet add package GeregeSystems.EidMongolia.Pades --version 0.5.0
 ## Урсгал
 
 ```csharp
+using System.Text.Json;
 using GeregeSystems.EidMongolia.Pades;
 
 // 1. Бэлдэх — сүлжээгүй. SignerCert = иргэний SIGN гэрчилгээ (CA-ийн сессийн хариунаас, DER).
@@ -57,7 +58,11 @@ Completed done = await EidPades.CompleteAsync(prepared.State, signature, cancell
 File.WriteAllBytes("signed.pdf", done.Pdf);
 
 // 4. Бүртгэх — CA POST /pdf/signatures-ийн бие (PDF биш, зөвхөн мета). JSON-оор шууд илгээж болно:
-SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions { SessionId = sessionId }); // токенд SessionId-гүй
+SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions
+{
+    SessionId = sessionId,                     // утсанд заавал; токенд өгөхгүй (Medium = token)
+    OnBehalfOf = orgRegNo,                     // NTRMN-… — ClaimedRole өгсөн бол заавал
+});
 string body = JsonSerializer.Serialize(reg);
 ```
 
@@ -76,7 +81,7 @@ string body = JsonSerializer.Serialize(reg);
 
 | `Code` | Код | Утга |
 |---|---|---|
-| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй; бүтэц хэт гүн (давхарлалт > 256) эсвэл ObjStm/xref мөчлөг, `/Size` > 2^21 |
+| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй; бүтэц хэт гүн (давхарлалт > 256) эсвэл ObjStm мөчлөг, `/Extends` > 64, `/Size` > 2^21 (PRECHECKS #2a/#2b) |
 | `PdfEncrypted` | `PDF_ENCRYPTED` | Шифрлэгдсэн PDF |
 | `PdfLocked` | `PDF_LOCKED` | DocMDP P=1 — өөрчлөхийг хориглосон |
 | `PdfTooLarge` | `PDF_TOO_LARGE` | 9.75 MiB (оролт) / 10 MiB (гаралт)-аас их |
@@ -91,6 +96,7 @@ string body = JsonSerializer.Serialize(reg);
 | `SelfValidationFailed` | `SELF_VALIDATION_FAILED` | Гаралт өөрийн шалгалтыг давсангүй |
 | `PlaceholderOverflow` | `PLACEHOLDER_OVERFLOW` | CMS placeholder-т багтсангүй |
 | `StateInvalid` | `STATE_INVALID` | `State` эвдэрсэн (эсвэл түүний PDF-ийн бүтэц хэт гүн/төвөгтэй) |
+| `Internal` | `INTERNAL` | SDK-ийн дотоод алдаа |
 | `Unknown` | бусад | Шинэ код — `RawCode`-ийг үз |
 
 ### Харагдах гарын үсгийн байршил
