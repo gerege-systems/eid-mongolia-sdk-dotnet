@@ -72,6 +72,16 @@ public sealed record Appearance
 
     /// <summary><c>mn</c> | <c>en</c>; <c>null</c>/хоосон = <see cref="PrepareOptions.Lang"/> (тэр нь хоосон бол mn).</summary>
     public string? Lang { get; init; }
+
+    /// <summary>
+    /// Дүрслэлийг яг <see cref="Page"/>/<see cref="X"/>/<see cref="Y"/>/<see cref="Width"/>/<see cref="Height"/>-д зурна
+    /// (иргэний өөрөө сонгосон байрлал) — агуулгаас зайлсхийж хэзээ ч шилжүүлэхгүй (JSON <c>exact</c>, PLACEMENT_SPEC.md §6a).
+    /// Хуудсыг уншсаар байгаа тул <see cref="Placement.Status"/> нь <see cref="PlacementStatus.Requested"/>, доор нь агуулга
+    /// байвал <see cref="PlacementStatus.Overlap"/>, уншиж чадаагүй бол <see cref="PlacementStatus.Unscanned"/>; хэзээ ч
+    /// <see cref="PlacementStatus.Moved"/> биш. Тэгш өнцөгт хуудаснаас гарвал REQUEST_INVALID. <c>false</c> (анхдагч) =
+    /// зөвхөн илүүд үзэх байрлал (өмнөхтэй байт-ижил).
+    /// </summary>
+    public bool Exact { get; init; }
 }
 
 /// <summary><see cref="EidPades.CompleteAsync"/>-ийн сонголт.</summary>
@@ -151,6 +161,68 @@ public sealed record Placement
     public PlacementStatus Status { get; init; }
 }
 
+/// <summary>
+/// <see cref="EidPades.SuggestPlacement"/>-ийн үр дүн (Go <c>pades.Suggestion</c>, PLACEMENT_SPEC.md §6b), pt.
+/// <see cref="Page"/>, <see cref="X"/>, <see cref="Y"/>, <see cref="Width"/>, <see cref="Height"/>, <see cref="Status"/> нь ижил
+/// PDF ба <see cref="Appearance"/>-д <see cref="EidPades.Prepare"/>-ийн <see cref="PreparedDocument.Placement"/>-тэй тэнцүү
+/// (гарын үсэггүй баримтад page 0 юуг ч алгасахгүй — §6b). Координат: харагдах хуудасны зүүн доод булангаас, X баруун, Y
+/// дээш; дээд-зүүн эхтэй UI-д <c>top = PageHeight − Y − Height</c>.
+/// </summary>
+public sealed record PlacementSuggestion
+{
+    /// <summary>Шийдэгдсэн хуудас (1-ээс; page 0 → PLACEMENT_SPEC.md §1a).</summary>
+    [JsonPropertyName("page")]
+    public int Page { get; init; }
+
+    /// <summary>Зүүн доод булангийн X (pt).</summary>
+    [JsonPropertyName("x")]
+    public double X { get; init; }
+
+    /// <summary>Зүүн доод булангийн Y (pt).</summary>
+    [JsonPropertyName("y")]
+    public double Y { get; init; }
+
+    /// <summary>Өргөн (pt).</summary>
+    [JsonPropertyName("width")]
+    public double Width { get; init; }
+
+    /// <summary>Өндөр (pt).</summary>
+    [JsonPropertyName("height")]
+    public double Height { get; init; }
+
+    /// <summary>Байрлалыг хэрхэн сонгосон (<see cref="Appearance.Exact"/> үед хэзээ ч <see cref="PlacementStatus.Moved"/> биш).</summary>
+    [JsonPropertyName("status")]
+    public PlacementStatus Status { get; init; }
+
+    /// <summary><see cref="Page"/>-ийн харагдах өргөн (CropBox, байхгүй бол MediaBox, /Rotate-ийн дараа; pt).</summary>
+    [JsonPropertyName("pageWidth")]
+    public double PageWidth { get; init; }
+
+    /// <summary><see cref="Page"/>-ийн харагдах өндөр (pt).</summary>
+    [JsonPropertyName("pageHeight")]
+    public double PageHeight { get; init; }
+
+    /// <summary>Хуудасны тоо (/Pages модны дарааллаар).</summary>
+    [JsonPropertyName("pageCount")]
+    public int PageCount { get; init; }
+
+    /// <summary>Хуудас бүрийн харагдах хэмжээ (индекс 0 = хуудас 1); {0, 0} = геометр нь уншигдахгүй хуудас.</summary>
+    [JsonPropertyName("pages")]
+    public IReadOnlyList<PageSize> Pages { get; init; } = Array.Empty<PageSize>();
+}
+
+/// <summary>Хуудасны харагдах хэмжээ, pt (<see cref="PlacementSuggestion.Pages"/>).</summary>
+public sealed record PageSize
+{
+    /// <summary>Өргөн (pt).</summary>
+    [JsonPropertyName("width")]
+    public double Width { get; init; }
+
+    /// <summary>Өндөр (pt).</summary>
+    [JsonPropertyName("height")]
+    public double Height { get; init; }
+}
+
 /// <summary><see cref="Placement.Status"/> — Go <c>Placement.Status</c>-ийн утгууд (JSON-д жижиг үсгээр).</summary>
 [JsonConverter(typeof(PlacementStatusJsonConverter))]
 public enum PlacementStatus
@@ -161,7 +233,10 @@ public enum PlacementStatus
     /// <summary><c>moved</c> — хүссэн байрлалд агуулга байсан тул эхний чөлөөт байрлал руу шилжсэн.</summary>
     Moved,
 
-    /// <summary><c>overlap</c> — чөлөөт байрлал алга: хүссэн байрлалд агуулга дээгүүр зурсан.</summary>
+    /// <summary>
+    /// <c>overlap</c> — чөлөөт байрлал алга (<see cref="Appearance.Exact"/>: хүссэн тэгш өнцөгтийн доор агуулга бий): хүссэн
+    /// байрлалд агуулга дээгүүр зурсан.
+    /// </summary>
     Overlap,
 
     /// <summary><c>unscanned</c> — хуудсыг хязгаарт багтааж уншиж чадсангүй (хэмжээ, шүүлтүүр): хүссэн байрлалд зурсан.</summary>

@@ -79,8 +79,31 @@ public class GoldenTests
                 Width = ap.GetProperty("width").GetDouble(),
                 Height = ap.GetProperty("height").GetDouble(),
                 Lang = Str(ap, "lang"),
+                Exact = ap.TryGetProperty("exact", out var ex) && ex.GetBoolean(),
             } : null,
         };
+
+        // PLACEMENT_SPEC.md §6b (golden v7): SuggestPlacement on every visible case — expect.suggestion field-for-field,
+        // or expect.suggestionError.
+        PlacementSuggestion? sug = null;
+        if (opts.Appearance is not null)
+        {
+            try
+            {
+                sug = EidPades.SuggestPlacement(input, opts.Appearance);
+                Assert.Null(Str(exp, "suggestionError"));
+                AssertSuggestion(exp.GetProperty("suggestion"), sug);
+            }
+            catch (EidPadesException e) when (Str(exp, "suggestionError") is not null)
+            {
+                Assert.Equal(Str(exp, "suggestionError"), e.RawCode);
+                Assert.False(exp.TryGetProperty("suggestion", out var s) && s.ValueKind != JsonValueKind.Null, "suggestion and suggestionError");
+            }
+        }
+        else
+        {
+            Assert.False(exp.TryGetProperty("suggestion", out _), "suggestion on an invisible case");
+        }
 
         PreparedDocument prep;
         try
@@ -93,6 +116,14 @@ public class GoldenTests
             return;
         }
         Assert.Null(Str(exp, "error"));
+        Assert.True(opts.Appearance is null || sug is not null, "SuggestPlacement failed while Prepare succeeded");
+        // page0-two-verify: an unsigned input whose verify pages carry the docId the caller passes to Prepare — the one case
+        // where SuggestPlacement (nothing skipped on unsigned input) differs from Prepared.Placement (PLACEMENT_SPEC.md §6b).
+        if (sug is not null && name != "page0-two-verify")
+        {
+            Assert.Equal(new Placement { Page = sug.Page, X = sug.X, Y = sug.Y, Width = sug.Width, Height = sug.Height, Status = sug.Status },
+                prep.Placement);
+        }
         var st = PrepState.Decode(prep.State);
         Assert.Equal(Str(exp, "docId"), prep.DocId);
         Assert.Equal(Str(exp, "digest"), Hex(prep.Digest));
@@ -157,6 +188,26 @@ public class GoldenTests
         }
     }
 
+    /// <summary>expect.suggestion (Go pades.Suggestion JSON) ↔ PlacementSuggestion, field-for-field (numbers as JSON numbers).</summary>
+    private static void AssertSuggestion(JsonElement want, PlacementSuggestion got)
+    {
+        Assert.Equal(want.GetProperty("page").GetInt32(), got.Page);
+        Assert.Equal(want.GetProperty("x").GetDouble(), got.X);
+        Assert.Equal(want.GetProperty("y").GetDouble(), got.Y);
+        Assert.Equal(want.GetProperty("width").GetDouble(), got.Width);
+        Assert.Equal(want.GetProperty("height").GetDouble(), got.Height);
+        Assert.Equal(want.GetProperty("status").GetString(), JsonSerializer.Serialize(got.Status).Trim('"'));
+        Assert.Equal(want.GetProperty("pageWidth").GetDouble(), got.PageWidth);
+        Assert.Equal(want.GetProperty("pageHeight").GetDouble(), got.PageHeight);
+        Assert.Equal(want.GetProperty("pageCount").GetInt32(), got.PageCount);
+        var pages = want.GetProperty("pages").EnumerateArray()
+            .Select(p => new PageSize { Width = p.GetProperty("width").GetDouble(), Height = p.GetProperty("height").GetDouble() }).ToArray();
+        Assert.Equal(pages, got.Pages);
+        // The public JSON shape is Go's: same property names, same values.
+        using var mine = JsonDocument.Parse(JsonSerializer.Serialize(got));
+        Assert.Equal(want.EnumerateObject().Select(p => p.Name), mine.RootElement.EnumerateObject().Select(p => p.Name));
+    }
+
     private static string[] PriorRevisions(JsonElement c)
     {
         var inputRef = c.GetProperty("input").GetString()!;
@@ -171,6 +222,12 @@ public class GoldenTests
         var cases = Manifest.GetProperty("cases").EnumerateArray().ToList();
         Assert.True(cases.Count >= 17, "golden case цөөн");
         Assert.True(cases.Count(c => c.GetProperty("prepare").TryGetProperty("appearance", out _)) >= 5, "харагдах golden case цөөн");
+        // golden v7 (PLACEMENT_SPEC.md §6a/§6b): exact cases and a suggestion on every visible case.
+        Assert.True(cases.Count(c => c.GetProperty("prepare").TryGetProperty("appearance", out var a) && a.TryGetProperty("exact", out _)) >= 5,
+            "exact golden case цөөн");
+        Assert.All(cases.Where(c => c.GetProperty("prepare").TryGetProperty("appearance", out _)), c =>
+            Assert.True(c.GetProperty("expect").TryGetProperty("suggestion", out _) || c.GetProperty("expect").TryGetProperty("suggestionError", out _),
+                c.GetProperty("name").GetString()));
     }
 
     private static string Hex(byte[] b) => Convert.ToHexString(b).ToLowerInvariant();

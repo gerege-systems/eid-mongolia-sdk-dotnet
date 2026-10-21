@@ -17,9 +17,10 @@ internal sealed class AppearanceException : Exception
 
 /// <summary>
 /// SignatureRevision.Prepare-ийн харагдах оролт: байршил (харагдах хуудасны орон зайд, h100) ба бичвэр. Page — 1-ээс,
-/// шийдэгдсэн (0 биш); Date — «YYYY-MM-DD HH:MM (+08)»; Url — https://ca.eidmongolia.mn/verify/&lt;docID&gt;/&lt;revIndex&gt;.
+/// шийдэгдсэн (0 биш); Date — «YYYY-MM-DD HH:MM (+08)»; Url — https://ca.eidmongolia.mn/verify/&lt;docID&gt;/&lt;revIndex&gt;;
+/// Exact — <c>appearance.exact</c> (PLACEMENT_SPEC.md §6a): never moved, the scan only sets the status.
 /// </summary>
-internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url);
+internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false);
 
 /// <summary>W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270.</summary>
 internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url);
@@ -269,7 +270,16 @@ internal static class SignatureAppearance
     /// </summary>
     public static (int Page, int N) DefaultStampPage(byte[] doc, string verifyUri)
     {
-        var inc = Incremental.Open(doc);
+        var pages = PageList(Incremental.Open(doc).Root.Key("Pages"));
+        int n = pages.Count;
+        for (int i = n - 1; i >= 0; i--)
+            if (!IsVerifyPage(pages[i], verifyUri)) return (i + 1, n);
+        return (n, n);
+    }
+
+    /// <summary>Go core.pageList: /Page объектууд /Pages модны дарааллаар (гүн ≤ 32, хамгийн ихдээ 65 537).</summary>
+    internal static List<PdfValue> PageList(PdfValue root)
+    {
         var pages = new List<PdfValue>();
         void Walk(PdfValue v, int depth)
         {
@@ -285,11 +295,51 @@ internal static class SignatureAppearance
                     break;
             }
         }
-        Walk(inc.Root.Key("Pages"), 0);
+        Walk(root, 0);
+        return pages;
+    }
+
+    /// <summary>
+    /// Go core.SuggestVisible (PLACEMENT_SPEC.md §6, §6b): the placement SignatureRevision.Prepare would choose, without
+    /// writing anything. page 0 → the last page that is not a verify page of verifyUri ("" = none skipped → the last page);
+    /// x, y, w, h in h100. The rect must lie inside the page (AppearanceException otherwise), exactly as for Prepare.
+    /// Pages — the visible size (h100) of every page; null = that page's geometry is unreadable.
+    /// </summary>
+    public static (int Page, PlaceResult Placement, (long W, long H)?[] Pages) Suggest(byte[] doc, string verifyUri, int page, long x, long y,
+        long w, long h, bool exact)
+    {
+        var pages = PageList(Incremental.Open(doc).Root.Key("Pages"));
         int n = pages.Count;
-        for (int i = n - 1; i >= 0; i--)
-            if (!IsVerifyPage(pages[i], verifyUri)) return (i + 1, n);
-        return (n, n);
+        if (page == 0)
+        {
+            page = n;
+            for (int i = n - 1; verifyUri != "" && i >= 0; i--)
+            {
+                if (!IsVerifyPage(pages[i], verifyUri))
+                {
+                    page = i + 1;
+                    break;
+                }
+            }
+        }
+        if (page < 1 || page > n)
+            throw new AppearanceException(string.Create(CultureInfo.InvariantCulture, $"page {page} > хуудасны тоо {n}"));
+        var sizes = new (long W, long H)?[n];
+        for (int i = 0; i < n; i++)
+        {
+            try
+            {
+                var (b, r) = PageGeometry(pages[i]);
+                long vw = b[2] - b[0], vh = b[3] - b[1];
+                sizes[i] = r is 90 or 270 ? (vh, vw) : (vw, vh);
+            }
+            catch (AppearanceException)
+            {
+            }
+        }
+        var (box, rot) = PageGeometry(pages[page - 1]);
+        Rect(box, rot, x, y, w, h);
+        return (page, StampPlacement.Choose(pages[page - 1], box, rot, x, y, w, h, exact), sizes);
     }
 
     /// <summary>Go isVerifyPage-ийн уншиx /Annots-ийн дээд тоо (PLACEMENT_SPEC §3.7-тэй ижил).</summary>

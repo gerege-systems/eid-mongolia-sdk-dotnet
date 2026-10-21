@@ -121,6 +121,25 @@ pt; `Status`):
 `Overlap` / `Unscanned`-ийг хэрэглэгчид мэдэгдэх нь зүйтэй; гарын үсэг аль ч тохиолдолд хүчинтэй. Дүрэм: Go репогийн
 `pades/PLACEMENT_SPEC.md` (Go-той байт-ижил; `testdata/golden/placement/vectors.json`-оор box бүрийг тулгана).
 
+**Иргэн өөрөө байрлуулах** (PLACEMENT_SPEC §6a/§6b). `EidPades.SuggestPlacement(pdf, appearance)` нь Prepare-ийн
+байршлыг гарын үсэг, гэрчилгээ, сүлжээгүйгээр ажиллуулж анхдагч байрлал, хуудасны хэмжээг буцаана; иргэн урьдчилан
+харах дээр чирж байрлуулсны дараа `Appearance.Exact = true`-аар Prepare дуудвал дүрслэл яг тэр тэгш өнцөгтөд зурагдана
+(хэзээ ч шилжихгүй; доор нь агуулга байвал `Status = Overlap`, хуудаснаас гарвал `REQUEST_INVALID`):
+
+```csharp
+var s = EidPades.SuggestPlacement(pdf, new Appearance { X = 340, Y = 36, Width = 220, Height = 64 });
+// s.Page, s.X, s.Y, s.Width, s.Height, s.Status — Prepare-ийн Placement-тэй ижил; s.PageWidth/PageHeight,
+// s.PageCount, s.Pages[i].Width/Height (pt). UI (дээд-зүүн эх, s px/pt): left = X·s, top = (PageHeight − Y − Height)·s.
+var prepared = EidPades.Prepare(pdf, opts with
+{
+    Appearance = new Appearance { Page = s.Page, X = x, Y = y, Width = s.Width, Height = s.Height, Exact = true },
+});
+```
+
+`SuggestPlacement`-ийн алдаа: `PDF_TOO_LARGE`, `PDF_INVALID`, `REQUEST_INVALID`, `PDF_ENCRYPTED`. Өмнөх гарын үсэг
+(`PDF_FOREIGN_SIGNATURE`…) ба нэр дүрслэлд багтах эсэхийг Prepare л шалгана. Page 0: гарын үсэгтэй баримтад verify
+хуудасны холбоосын docId-оор verify хуудсуудыг алгасна; гарын үсэггүй баримтад юуг ч алгасахгүй (сүүлийн хуудас).
+
 Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар (#2a/#2b бүтэц, #4 `/Encrypt` лавлагаа
 эсвэл шууд толь). `CompleteAsync`-ийн OCSP нь гэрчилгээний CertID (олгогчийн нэр/түлхүүрийн hash + serial)-тай, CRL нь
 олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол
@@ -137,7 +156,8 @@ thisUpdate ≥ одоо − 24 ц) байна.
   тогтмол nonce/цаг) → гаралтын PDF-ийг Go-ийнхтэй **бүхэлд нь** байт-түвшинд тулгана; eid-desktop (Swift)-ийн golden;
   алдааны замууд; ECDSA (r‖s, DER); цуцлалтын дүрэм (`RevocationTests` — 04-ийн түлхүүрээр зурсан OCSP/CRL); бүтцийн
   шалгалт (`StructureTests`, `testdata/structure` — Go/TS-ийн оролтууд); дүрслэлийн байршил (`PlacementTests` — Go-ийн
-  `placement/vectors.json`-ийн box бүр, нэр дэвшигчдийн дараалал, эвдэрсэн content/Flate stream дээр алдаа шидэхгүй).
+  `placement/vectors.json`-ийн box бүр, нэр дэвшигчдийн дараалал, эвдэрсэн content/Flate stream дээр алдаа шидэхгүй);
+  харагдах golden тохиолдол бүрд `SuggestPlacement` (`expect.suggestion` талбар бүрээр, `suggestionError`).
 - Фонт (`Assets/`): Noto Sans subset, SIL OFL 1.1 — Go reference-ийн `pades/assets/fonts`-тай ижил байт.
 - PDF уншигч/бичигч нь digitorus/pdf (BSD-3) ба digitorus/pdfsign (BSD-2)-ийн семантикийг давтана — лиценз `Pdf/LICENSE.*`.
 
@@ -165,7 +185,11 @@ RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS re
 name/role, date — APPEARANCE_SPEC.md); `X/Y` is the preferred spot — the stamp moves off existing page content to
 the first free spot and `PreparedDocument.Placement` reports where it went and why (`Requested | Moved | Overlap |
 Unscanned`, PLACEMENT_SPEC.md). `Appearance.Page` 0 = the last page that is not an eID verify page (earlier revisions'
-verify pages — a `/Link` to `https://ca.eidmongolia.mn/verify/<docId>` — are skipped; PLACEMENT_SPEC §1a). `Completed`
+verify pages — a `/Link` to `https://ca.eidmongolia.mn/verify/<docId>` — are skipped; PLACEMENT_SPEC §1a).
+`Appearance.Exact = true` draws the stamp exactly at the requested rect (a position the signer chose on a page preview):
+never moved, status `Requested` or `Overlap`. `EidPades.SuggestPlacement(pdf, appearance)` runs Prepare's placement
+without a certificate, signing or network and returns the resolved page, rect, status and every page's visible size
+(`PlacementSuggestion`, PLACEMENT_SPEC §6b). `Completed`
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
 builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
 issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is
