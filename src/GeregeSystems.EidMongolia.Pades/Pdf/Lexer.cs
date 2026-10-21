@@ -343,6 +343,8 @@ internal sealed class Lexer
             var tok = ReadToken();
             if (tok is null || tok is PdfKeyword { Value: "]" }) break;
             if (tok == Eof) throw new PdfFormatException("unexpected EOF in array");
+            // ReadObject un-reads endobj without consuming it: inside an array that would never advance.
+            if (tok is PdfKeyword { Value: "endobj" }) throw new PdfFormatException("unterminated array");
             UnreadToken(tok);
             x.Add(ReadObject());
         }
