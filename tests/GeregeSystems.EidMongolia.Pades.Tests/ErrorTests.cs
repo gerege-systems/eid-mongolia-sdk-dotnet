@@ -234,6 +234,41 @@ public class ErrorTests
         Assert.Equal(EidPadesErrorCode.TsaUnavailable, ex.Code);
     }
 
+    /// <summary>The checks SuggestPlacement shares with Prepare (PLACEMENT_SPEC.md §6b; Go TestSuggestPlacementErrors).</summary>
+    [Theory]
+    [InlineData("not-pdf", 0, 340, 36, 220, 64, false, "PDF_INVALID")]
+    [InlineData("encrypted", 0, 340, 36, 220, 64, false, "PDF_ENCRYPTED")]
+    [InlineData("table", 2, 340, 36, 220, 64, false, "REQUEST_INVALID")] // page > page count
+    [InlineData("table", 0, 400, 36, 220, 64, true, "REQUEST_INVALID")] // outside the page (exact)
+    [InlineData("table", 0, 400, 36, 220, 64, false, "REQUEST_INVALID")] // outside the page (auto)
+    [InlineData("table", 0, -1, 36, 220, 64, false, "REQUEST_INVALID")]
+    [InlineData("table", 0, 1, 36, 0, 64, false, "REQUEST_INVALID")]
+    public void SuggestPlacementErrors(string input, int page, double x, double y, double w, double h, bool exact, string code)
+    {
+        var doc = input switch
+        {
+            "not-pdf" => Encoding.ASCII.GetBytes("hello"),
+            "encrypted" => Fixtures.Read("input", "encrypted.pdf"),
+            _ => Fixtures.Read("input", "table-bottom.pdf"),
+        };
+        var a = new Appearance { Page = page, X = x, Y = y, Width = w, Height = h, Exact = exact };
+        Assert.Equal(code, Throws(() => EidPades.SuggestPlacement(doc, a)).RawCode);
+    }
+
+    [Fact]
+    public void SuggestPlacementTooLarge() =>
+        Assert.Equal(EidPadesErrorCode.PdfTooLarge,
+            Throws(() => EidPades.SuggestPlacement(new byte[EidPades.MaxInputBytes + 1], new Appearance { Width = 220, Height = 64 })).Code);
+
+    [Fact]
+    public void SuggestPlacementExactNeverMoves()
+    {
+        var s = EidPades.SuggestPlacement(Fixtures.Read("input", "table-bottom.pdf"),
+            new Appearance { X = 340, Y = 36, Width = 220, Height = 64, Exact = true });
+        Assert.Equal(PlacementStatus.Overlap, s.Status);
+        Assert.Equal((1, 340d, 36d, 1, 1), (s.Page, s.X, s.Y, s.PageCount, s.Pages.Count));
+    }
+
     [Fact]
     public void UnknownCodeMapsToUnknown()
     {

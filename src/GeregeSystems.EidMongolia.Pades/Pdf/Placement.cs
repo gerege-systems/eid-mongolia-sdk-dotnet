@@ -51,26 +51,45 @@ internal static class StampPlacement
             {
                 continue;
             }
-            long e0 = r[0] - Pad, e1 = r[1] - Pad, e2 = r[2] + Pad, e3 = r[3] + Pad;
-            bool free = true;
-            foreach (var b in occ)
-            {
-                if (b[0] < e2 && e0 < b[2] && b[1] < e3 && e1 < b[3])
-                {
-                    free = false;
-                    break;
-                }
-            }
-            if (free) return (cx, cy, true);
+            if (Free(r, occ)) return (cx, cy, true);
         }
         return (x, y, false);
     }
 
-    /// <summary>Scan the page and choose the stamp position (Go prepareSignature, Visible.Avoid).</summary>
-    public static PlaceResult Choose(PdfValue page, long[] box, int rot, long x, long y, long w, long h)
+    /// <summary>
+    /// Go placeFree: r (user space, h100) grown by Pad on every side overlaps no occupied box (strict overlap: touching
+    /// edges are free).
+    /// </summary>
+    private static bool Free(long[] r, List<long[]> occ)
+    {
+        long e0 = r[0] - Pad, e1 = r[1] - Pad, e2 = r[2] + Pad, e3 = r[3] + Pad;
+        foreach (var b in occ)
+            if (b[0] < e2 && e0 < b[2] && b[1] < e3 && e1 < b[3]) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Go core.PlaceOnPage — PLACEMENT_SPEC.md §6 on a page whose geometry is known and whose requested rect is inside it:
+    /// scan the page and choose the stamp position. exact (§6a) → the requested rect is the only candidate (never moved):
+    /// requested when free, overlap when not.
+    /// </summary>
+    public static PlaceResult Choose(PdfValue page, long[] box, int rot, long x, long y, long w, long h, bool exact)
     {
         var occ = Occupancy.Scan(page, box);
         if (occ is null) return new PlaceResult(x, y, PlacementStatus.Unscanned);
+        if (exact)
+        {
+            bool free;
+            try
+            {
+                free = Free(SignatureAppearance.Rect(box, rot, x, y, w, h), occ);
+            }
+            catch (AppearanceException)
+            {
+                free = false;
+            }
+            return new PlaceResult(x, y, free ? PlacementStatus.Requested : PlacementStatus.Overlap);
+        }
         var (px, py, ok) = Place(box, rot, x, y, w, h, occ);
         if (!ok) return new PlaceResult(x, y, PlacementStatus.Overlap);
         if (px != x || py != y) return new PlaceResult(px, py, PlacementStatus.Moved);

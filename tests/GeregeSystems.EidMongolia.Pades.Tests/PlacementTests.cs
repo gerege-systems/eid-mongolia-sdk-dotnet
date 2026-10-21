@@ -79,7 +79,7 @@ public class PlacementTests
             for (int i = 0; i < want.Count; i++) Assert.True(want[i].SequenceEqual(occ[i]), $"{name}: box {i}: want [{string.Join(' ', want[i])}] got [{string.Join(' ', occ[i])}]");
         }
 
-        var placed = StampPlacement.Choose(page, box, rot, req[0], req[1], req[2], req[3]);
+        var placed = StampPlacement.Choose(page, box, rot, req[0], req[1], req[2], req[3], exact: false);
         Assert.Equal(exp.GetProperty("status").GetString(), Status(placed.Status));
         Assert.Equal(exp.GetProperty("x").GetInt64(), placed.X);
         Assert.Equal(exp.GetProperty("y").GetInt64(), placed.Y);

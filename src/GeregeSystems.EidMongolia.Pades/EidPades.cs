@@ -175,6 +175,80 @@ public static partial class EidPades
     }
 
     /// <summary>
+    /// Prepare-ийн байршлын алгоритмыг (page 0 шийдэх, хуудас уншиж агуулгаас зайлсхийх, <see cref="Appearance.Exact"/>)
+    /// гарын үсэг зурахгүйгээр ажиллуулна (PLACEMENT_SPEC.md §6b) — UI урьдчилж харахад анхдагч байрлал, хуудасны хэмжээ,
+    /// сонгосон тэгш өнцөгт агуулга дээр байгаа эсэхийг харуулна. Гэрчилгээ, сүлжээ ашиглахгүй.
+    /// Үр дүн нь ижил PDF ба appearance-д <see cref="PreparedDocument.Placement"/>-тэй тэнцүү; page 0 нь гарын үсэгтэй баримтад
+    /// verify хуудасны холбоосоос уншсан docId-ийн хуудсуудыг алгасна, гарын үсэггүй баримтад юуг ч алгасахгүй (сүүлийн хуудас).
+    /// </summary>
+    /// <exception cref="EidPadesException">
+    /// PDF_TOO_LARGE, PDF_INVALID (толгой, бүтэц, задлал), REQUEST_INVALID (appearance-ийн утга, page &gt; хуудасны тоо,
+    /// хуудасны геометр, тэгш өнцөгт хуудаснаас гарсан), PDF_ENCRYPTED. Өмнөх гарын үсэг (PDF_FOREIGN_SIGNATURE…) ба нэр
+    /// дүрслэлд багтах эсэхийг шалгахгүй — тэдгээрийг Prepare шалгана.
+    /// </exception>
+    public static PlacementSuggestion SuggestPlacement(byte[] pdf, Appearance appearance)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(appearance);
+        if (pdf.Length > MaxInputBytes) throw new EidPadesException("PDF_TOO_LARGE", "PDF is larger than 9.75 MiB");
+        if (!pdf.AsSpan().StartsWith("%PDF-"u8)) throw new EidPadesException("PDF_INVALID", "not a PDF or damaged");
+        try
+        {
+            Structure.Check(pdf);
+        }
+        catch (PdfStructureException e)
+        {
+            throw new EidPadesException("PDF_INVALID", "PDF structure is too deeply nested or too complex", e);
+        }
+        CheckAppearance(new PrepareOptions { Appearance = appearance });
+        if (Prechecks.Encrypted(pdf)) throw new EidPadesException("PDF_ENCRYPTED", "encrypted PDF is not supported");
+        List<Prechecks.SigDict> sigs;
+        try
+        {
+            (sigs, _, _) = Prechecks.Scan(pdf);
+        }
+        catch (Exception e) when (Prechecks.IsParseError(e))
+        {
+            throw new EidPadesException("PDF_INVALID", "not a PDF or damaged", e);
+        }
+        var verifyUri = "";
+        if (sigs.Count > 0 && Prechecks.DocIdFromPage(pdf) is { Length: > 0 } id) verifyUri = PageVerifyUrl + id;
+        long w = SignatureAppearance.Round100(appearance.Width), h = SignatureAppearance.Round100(appearance.Height);
+        int page;
+        PlaceResult pl;
+        (long W, long H)?[] sizes;
+        try
+        {
+            (page, pl, sizes) = SignatureAppearance.Suggest(pdf, verifyUri, appearance.Page, SignatureAppearance.Round100(appearance.X),
+                SignatureAppearance.Round100(appearance.Y), w, h, appearance.Exact);
+        }
+        catch (AppearanceException e)
+        {
+            throw new EidPadesException("REQUEST_INVALID", "appearance: " + e.Message, e);
+        }
+        catch (Exception e) when (Prechecks.IsParseError(e))
+        {
+            throw new EidPadesException("PDF_INVALID", "could not parse the PDF", e);
+        }
+        var pages = new PageSize[sizes.Length];
+        for (int i = 0; i < sizes.Length; i++)
+            pages[i] = sizes[i] is { } z ? new PageSize { Width = z.W / 100.0, Height = z.H / 100.0 } : new PageSize();
+        return new PlacementSuggestion
+        {
+            Page = page,
+            X = pl.X / 100.0,
+            Y = pl.Y / 100.0,
+            Width = w / 100.0,
+            Height = h / 100.0,
+            Status = pl.Status,
+            PageWidth = pages[page - 1].Width,
+            PageHeight = pages[page - 1].Height,
+            PageCount = pages.Length,
+            Pages = pages,
+        };
+    }
+
+    /// <summary>
     /// Гарын үсгийг DTBS дээр шалгаад RFC 3161 timestamp → CMS → embed → OCSP/CRL (genTime-ийн дараа) → DSS revision.
     /// </summary>
     /// <param name="state"><see cref="PreparedDocument.State"/>.</param>
@@ -370,7 +444,7 @@ public static partial class EidPades
         return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(a.Width),
             SignatureAppearance.Round100(a.Height), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
             now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " (+08)",
-            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture));
+            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact);
     }
 
     /// <summary>DTBS дээрх гарын үсгийг шалгаж CMS-д бичих хэлбэрээр (RSA хэвээр, ECDSA DER) буцаана; таарахгүй бол null.</summary>

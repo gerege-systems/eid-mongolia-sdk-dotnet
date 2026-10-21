@@ -84,8 +84,9 @@ internal static class SignatureRevision
             if (!hasPage) throw new AppearanceException("хуудас " + vis.Page.ToString(CultureInfo.InvariantCulture) + " алга");
             var (box, rot) = SignatureAppearance.PageGeometry(page);
             var rect = SignatureAppearance.Rect(box, rot, vis.X, vis.Y, vis.W, vis.H);
-            // PLACEMENT_SPEC.md: move off existing page content; the requested rect stays when nothing is free.
-            placed = StampPlacement.Choose(page, box, rot, vis.X, vis.Y, vis.W, vis.H);
+            // PLACEMENT_SPEC.md: move off existing page content (Exact: only report it); the requested rect stays when
+            // nothing is free.
+            placed = StampPlacement.Choose(page, box, rot, vis.X, vis.Y, vis.W, vis.H, vis.Exact);
             if (placed.Status == PlacementStatus.Moved) rect = SignatureAppearance.Rect(box, rot, placed.X, placed.Y, vis.W, vis.H);
             var bodies = SignatureAppearance.Objects(new AppearanceParams(vis.W, vis.H, rot, vis.Name, vis.Role, vis.Lang, vis.Date, vis.Url), apIds);
             inc.WriteObject(fieldId, SignatureAppearance.Widget(fieldName, rect, page.Ptr.Id, page.Ptr.Gen, sigId, apIds[0]));
