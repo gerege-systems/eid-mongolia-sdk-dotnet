@@ -349,8 +349,11 @@ internal static class VerifyPage
         return (Encoding.ASCII.GetBytes(w.Ops.ToString()), w.Links);
     }
 
-    /// <summary>base-ийн ард хуудсыг incremental revision-оор нэмнэ; Catalog өөрчлөгдөхгүй.</summary>
-    public static byte[] Append(byte[] baseBytes, PageData p)
+    /// <summary>
+    /// base-д хуудсыг incremental revision-оор нэмнэ: үндсэн /Pages-ийн /Kids-ийн төгсгөлд, <paramref name="first"/> бол
+    /// эхэнд (PAGE_SPEC.md §8a); Catalog өөрчлөгдөхгүй.
+    /// </summary>
+    public static byte[] Append(byte[] baseBytes, PageData p, bool first = false)
     {
         var reg = PageFont.Regular.Value;
         var bld = PageFont.Bold.Value;
@@ -414,12 +417,25 @@ internal static class VerifyPage
         var kids = pages.Key("Kids");
         var kp = kids.Ptr;
         pn.Ascii(" /Kids [");
-        for (int i = 0; i < kids.Len; i++)
+        if (first)
         {
-            Serializer.Serialize(pn, kids.Index(i), kp.Id, 0);
-            pn.Ascii(" ");
+            pn.Ascii(string.Create(CultureInfo.InvariantCulture, $"{pageId} 0 R"));
+            for (int i = 0; i < kids.Len; i++)
+            {
+                pn.Ascii(" ");
+                Serializer.Serialize(pn, kids.Index(i), kp.Id, 0);
+            }
+            pn.Ascii(string.Create(CultureInfo.InvariantCulture, $"] /Count {count + 1} >>"));
         }
-        pn.Ascii(string.Create(CultureInfo.InvariantCulture, $"{pageId} 0 R] /Count {count + 1} >>"));
+        else
+        {
+            for (int i = 0; i < kids.Len; i++)
+            {
+                Serializer.Serialize(pn, kids.Index(i), kp.Id, 0);
+                pn.Ascii(" ");
+            }
+            pn.Ascii(string.Create(CultureInfo.InvariantCulture, $"{pageId} 0 R] /Count {count + 1} >>"));
+        }
         inc.WriteObjectGen(pp.Id, pp.Gen, pn.ToArray());
         return inc.Finish(rp.Id);
     }

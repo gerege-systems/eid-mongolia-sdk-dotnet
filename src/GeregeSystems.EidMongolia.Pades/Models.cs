@@ -35,6 +35,14 @@ public sealed record PrepareOptions
     /// <summary>Баталгаажуулалтын (QR) хуудас нэмэх — зөвхөн гарын үсэггүй баримтад (эхний eID гарын үсэг).</summary>
     public bool VerifyPage { get; init; }
 
+    /// <summary>
+    /// Where the verify page goes when it is added (<see cref="VerifyPage"/> on an unsigned document):
+    /// <c>"last"</c> (default; also <c>null</c>/empty) or <c>"first"</c> (it becomes page 1). <see cref="Appearance.Page"/>,
+    /// <see cref="EidPades.SuggestPlacement"/> and <see cref="Placement.Page"/> always count the pages of the input PDF
+    /// as given — never the added page (PAGE_SPEC.md §8a, PLACEMENT_SPEC.md §1b). Other values → REQUEST_INVALID.
+    /// </summary>
+    public string? VerifyPagePosition { get; init; }
+
     /// <summary>Хуудсанд харуулах файлын нэр (<see cref="VerifyPage"/> үед заавал, ≤ 120 тэмдэгт).</summary>
     public string? FileName { get; init; }
 
