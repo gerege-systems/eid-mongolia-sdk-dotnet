@@ -19,8 +19,8 @@ public class LexerTests
     private static byte[] L(string s) => Encoding.Latin1.GetBytes(s);
 
     [Theory]
-    [InlineData("1 0 obj [1 endobj", false)]
-    [InlineData("1 0 obj << /K [[ endobj", false)]
+    [InlineData("1 0 obj [1 endobj\n", false)]
+    [InlineData("1 0 obj << /K [[ endobj\n", false)]
     [InlineData("[1 2", true)]
     [InlineData("<0a", true)]
     [InlineData("(abc", true)]
@@ -33,8 +33,8 @@ public class LexerTests
     }
 
     [Theory]
-    [InlineData("1 0 obj [1 2 0 R (a) <0a> /N] endobj")]
-    [InlineData("1 0 obj endobj")]
+    [InlineData("1 0 obj [1 2 0 R (a) <0a> /N] endobj\n")]
+    [InlineData("1 0 obj endobj\n")]
     public void WellFormedObjectStillParses(string input)
     {
         var data = L(input);
