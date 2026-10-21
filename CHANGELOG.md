@@ -2,6 +2,28 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.8.0 — 2026-10-21
+
+### Tests — pades golden v8 (verify page chain with non-zero object generations)
+
+- **Юу:** golden-ийг eid-mongolia-sdk-go #40 (`21f8434`, `pades-golden-v8`) руу бэхэлсэн: `input/verify-gen1.pdf`
+  (verify хуудас `6 1 obj`, docId Link `7 1 obj`, URI action `8 2 obj`) ба кейс `verify-gen1`, `page0-verify-gen1`,
+  `page-explicit-verify-gen1`.
+- **Яагаад:** PLACEMENT_SPEC §1a «Object generations» — docId-ийг xref-ийн бодит generation-оор уншина (Swift port 0 гэж
+  таамагладаг байсныг CA репод зассан). .NET аль хэдийн зөв — кодын өөрчлөлтгүй.
+- **Хаана:** `build/go-sdk.ref`, `testdata/golden/`.
+- **Шалгасан:** `build/sync-golden.sh --check`; `dotnet test` — 182/182 (шинэ 3 `MatchesGoReference` кейс байт-ижил).
+
+### Added — `PrepareOptions.VerifyPagePosition` ("last" | "first"), golden v9
+
+- **Юу:** `VerifyPagePosition = "first"` — шалгах (QR) хуудас үндсэн `/Pages /Kids`-ийн эхэнд орж 1-р хуудас болно; анхдагч
+  `"last"` (null/хоосон) өмнөхтэй байт-ижил; бусад утга `REQUEST_INVALID`. `Appearance.Page`, `SuggestPlacement`,
+  `Placement.Page` оролтын PDF-ийн хуудсаар (SDK дотроо +1 болгож зурна).
+- **Яагаад:** портал/desktop-ийн «Баталгаажуулалтын хуудсыг эхэнд» сонголт; Go v0.15.0 (#41), PAGE_SPEC §8a, PLACEMENT_SPEC §1b.
+- **Хаана:** `Models.cs`, `EidPades.cs`, `Pdf/VerifyPage.cs`; `GoldenTests.cs` (manifest-ийн түлхүүр); `build/go-sdk.ref` →
+  Go `9e76888` (`pades-golden-v9`), `testdata/golden/`.
+- **Шалгасан:** CI (Windows + Linux `dotnet test`, golden-sync) — v9-ийн 8 `vpfirst-*` кейс Go-той байт-ижил.
+
 ## 0.7.0 — 2026-10-21
 
 ### Added — `Appearance.Exact` and `EidPades.SuggestPlacement` (golden v7)
