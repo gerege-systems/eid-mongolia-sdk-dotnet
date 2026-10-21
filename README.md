@@ -41,6 +41,8 @@ var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
     Reason = "Гэрээ баталгаажуулав",
     ClaimedRole = representation.ClaimedRole, // байгууллагын нэрийн өмнөөс бол (CA-ийн representation хариунаас)
     VerifyPage = true,                         // шалгах (QR) хуудас — зөвхөн эхний eID гарын үсэгт
+    // VerifyPagePosition = "first",           // 0.8.0+: QR хуудас 1-р хуудас болно (анхдагч "last"); Appearance.Page,
+                                               // SuggestPlacement, Placement.Page оролтын PDF-ийн хуудсаар (PAGE_SPEC §8a)
     FileName = "Гэрээ №1.pdf",
     Lang = "mn",                               // mn (анхдагч) | en
     // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = eID verify
@@ -187,7 +189,9 @@ the first free spot and `PreparedDocument.Placement` reports where it went and w
 Unscanned`, PLACEMENT_SPEC.md). `Appearance.Page` 0 = the last page that is not an eID verify page (earlier revisions'
 verify pages — a `/Link` to `https://ca.eidmongolia.mn/verify/<docId>` — are skipped; PLACEMENT_SPEC §1a).
 `Appearance.Exact = true` draws the stamp exactly at the requested rect (a position the signer chose on a page preview):
-never moved, status `Requested` or `Overlap`. `EidPades.SuggestPlacement(pdf, appearance)` runs Prepare's placement
+never moved, status `Requested` or `Overlap`. `VerifyPagePosition = "first"` (0.8.0+) puts the verify page at page 1
+(default `"last"`); page numbers in `Appearance.Page`, `SuggestPlacement` and `Placement.Page` always count the input
+PDF's pages (PAGE_SPEC §8a, PLACEMENT_SPEC §1b). `EidPades.SuggestPlacement(pdf, appearance)` runs Prepare's placement
 without a certificate, signing or network and returns the resolved page, rect, status and every page's visible size
 (`PlacementSuggestion`, PLACEMENT_SPEC §6b). `Completed`
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`

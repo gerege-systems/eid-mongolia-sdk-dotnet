@@ -89,6 +89,9 @@ public static partial class EidPades
             throw new EidPadesException("REQUEST_INVALID", "docId must be a lowercase UUID");
         if (!string.IsNullOrEmpty(options.Lang) && options.Lang is not ("mn" or "en"))
             throw new EidPadesException("REQUEST_INVALID", "lang: mn | en");
+        if (!string.IsNullOrEmpty(options.VerifyPagePosition) && options.VerifyPagePosition is not ("last" or "first"))
+            throw new EidPadesException("REQUEST_INVALID", "verifyPagePosition: last | first");
+        bool first = options.VerifyPagePosition == "first";
         CheckAppearance(options);
         var now = (options.SigningTime ?? DateTimeOffset.UtcNow).ToOffset(SigningZone);
 
@@ -116,7 +119,7 @@ public static partial class EidPades
             try
             {
                 baseBytes = VerifyPage.Append(pdf, new PageData(PageBrand, fileName, inHex, pdf.Length, docId, PageVerifyUrl + docId, PageTrustUrl,
-                    IssuerCommonName(cert), PageTsaName, PageProvider, options.Lang ?? ""));
+                    IssuerCommonName(cert), PageTsaName, PageProvider, options.Lang ?? ""), first);
             }
             catch (Exception e) when (Prechecks.IsParseError(e))
             {
@@ -130,7 +133,8 @@ public static partial class EidPades
         PreparedRevision prep;
         try
         {
-            prep = SignatureRevision.Prepare(baseBytes, now, name, options.Reason ?? "", vis);
+            // vis.Page counts the input's pages; a verify page added in front shifts them by one in base (PLACEMENT_SPEC §1b).
+            prep = SignatureRevision.Prepare(baseBytes, now, name, options.Reason ?? "", vis is not null && hasPage && first ? vis with { Page = vis.Page + 1 } : vis);
         }
         catch (AppearanceException e)
         {

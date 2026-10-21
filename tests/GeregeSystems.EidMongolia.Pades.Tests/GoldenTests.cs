@@ -69,6 +69,7 @@ public class GoldenTests
             SigningTime = Time("signingTime"),
             DocId = Str(p, "docId"),
             VerifyPage = p.TryGetProperty("verifyPage", out var vp) && vp.GetBoolean(),
+            VerifyPagePosition = Str(p, "verifyPagePosition"),
             FileName = Str(p, "fileName"),
             Lang = Str(p, "lang"),
             Appearance = p.TryGetProperty("appearance", out var ap) ? new Appearance
