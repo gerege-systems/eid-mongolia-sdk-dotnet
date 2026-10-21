@@ -2,6 +2,17 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.8.1 — 2026-10-21
+
+### Fixed — PDF lexer: массив доторх `endobj` дээр мөнхийн давталт
+
+- **Юу:** `Lexer.ReadArray` массив дотор `endobj` таарвал `PdfFormatException` (Prepare → `PDF_INVALID`) шиднэ. Өмнө нь
+  `ReadObject` `endobj`-г буцааж «уншаагүй» болгодог тул давталт ахихгүй, санах ой хязгааргүй өсдөг байв.
+- **Яагаад:** хортой/эвдэрсэн PDF Prepare-ийг гацааж болох байв (Go SDK/CA-ийн digitorus fork-ийн засвартай ижил).
+- **Хаана:** `src/GeregeSystems.EidMongolia.Pades/Pdf/Lexer.cs`; тест `tests/…/LexerTests.cs` (10 с-ийн хугацаатай).
+  Бусад давталт (hex/literal мөр, EOF массив, Structure/Occupancy сканнер, ObjStm `/Extends`) аль хэдийн ахиц/хязгаартай.
+- **Шалгасан:** CI (Windows + Linux `dotnet test`, PR #19) ногоон — локалд dotnet байхгүй.
+
 ## 0.8.0 — 2026-10-21
 
 ### Tests — pades golden v8 (verify page chain with non-zero object generations)
