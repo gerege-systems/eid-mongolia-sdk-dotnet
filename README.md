@@ -181,6 +181,10 @@ catch (EidQrException e) when (e.Code == EidQrErrorCodes.SessionFailed) { /* e.E
 catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationInvalid) { /* ИТГЭХГҮЙ */ }
 ```
 
+**Polling UI** (0.11.0+): `CheckAsync(s)` — нэг удаа шалгана → `QrCheck(Complete, Presentation)`. `ResultAsync`-ийн
+`maxWait` дуусахад иргэн хараахан хариулаагүй бол `QR_PENDING` (дахин дуудаж болно); CA-ийн жинхэнэ хугацаа дуусалт нь
+`SESSION_FAILED` + `EndResult = "TIMEOUT"`.
+
 Бусад код: `QR_FORMAT_INVALID`, `QR_ATTRIBUTES_INVALID` (CA руу явахгүй), `QR_JWKS_UNAVAILABLE` (түр), серверийн
 `code` (`REQUEST_INVALID`, 403 …) `HttpStatus`-тай, `HTTP_ERROR`, `NETWORK_ERROR`.
 
