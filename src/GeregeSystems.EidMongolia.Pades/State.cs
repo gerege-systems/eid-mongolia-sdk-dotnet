@@ -27,6 +27,7 @@ internal sealed class PrepState
     public string PageSha256 { get; set; } = "";
     public string ClaimedRole { get; set; } = "";
     public string FileName { get; set; } = "";
+    public List<PdfSignatureImage> Images { get; set; } = new();
     public string PreparedSha256 { get; set; } = "";
     public byte[] Pdf { get; set; } = Array.Empty<byte>();
 
@@ -51,6 +52,18 @@ internal sealed class PrepState
             if (PageSha256 != "") w.WriteString("pageSha256", PageSha256);
             if (ClaimedRole != "") w.WriteString("claimedRole", ClaimedRole);
             if (FileName != "") w.WriteString("fileName", FileName);
+            if (Images.Count > 0)
+            {
+                w.WriteStartArray("images");
+                foreach (var im in Images)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("kind", im.Kind);
+                    w.WriteString("sha256", im.Sha256);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+            }
             w.WriteString("preparedSha256", PreparedSha256);
             w.WriteEndObject();
         }
@@ -88,6 +101,9 @@ internal sealed class PrepState
             s.PageSha256 = Str(r, "pageSha256");
             s.ClaimedRole = Str(r, "claimedRole");
             s.FileName = Str(r, "fileName");
+            if (r.TryGetProperty("images", out var ims) && ims.ValueKind == JsonValueKind.Array)
+                foreach (var e in ims.EnumerateArray())
+                    s.Images.Add(new PdfSignatureImage(Str(e, "kind"), Str(e, "sha256")));
             s.PreparedSha256 = Str(r, "preparedSha256");
         }
         s.Pdf = b.AsSpan(Magic.Length + 4 + (int)n).ToArray();

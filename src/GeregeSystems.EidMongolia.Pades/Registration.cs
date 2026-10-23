@@ -100,6 +100,14 @@ public sealed record SignatureRegistration
     public string? SignerEtsi { get; init; }
 
     /// <summary>
+    /// Дүрслэлд шигтгэсэн зураг бүрийн {kind, sha256} (APPEARANCE_SPEC.md §6.6) — CA зурагчийн/байгууллагын хадгалсан PNG-тэй
+    /// тулгана. Зураггүй бол <c>null</c> (илгээхгүй).
+    /// </summary>
+    [JsonPropertyName("images")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PdfSignatureImage>? Images { get; init; }
+
+    /// <summary>
     /// SDK-д л (CA руу илгээгдэхгүй): өмнөх гарын үсэг бүрийн хоёр түлхүүр, баримтын дарааллаар. CA өмнөх мөр бүрийг өөрийн
     /// түлхүүрээр таньдаг (клиент талын — CMS, горим A — revision), файлаас ялгах боломжгүй.
     /// </summary>
@@ -163,6 +171,7 @@ public static partial class EidPades
             PriorCmsSha256 = completed.PriorCmsSha256.Count > 0 ? new List<string>(completed.PriorCmsSha256) : null,
             OnBehalfOf = string.IsNullOrEmpty(o.OnBehalfOf) ? null : o.OnBehalfOf,
             SignerEtsi = etsi,
+            Images = completed.Images.Count > 0 ? new List<PdfSignatureImage>(completed.Images) : null,
             PriorSignatures = prior,
         };
     }
