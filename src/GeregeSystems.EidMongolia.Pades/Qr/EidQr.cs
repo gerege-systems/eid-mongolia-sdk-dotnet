@@ -201,7 +201,8 @@ public static class EidQr
         {
             throw Bad("iss таарсангүй");
         }
-        if (string.IsNullOrEmpty(exp.Audience) || Str(c, "aud") != exp.Audience)
+        // aud = RP UUID (CA жижиг үсгээр бичнэ) — том/жижиг үсэг ялгахгүй.
+        if (string.IsNullOrEmpty(exp.Audience) || !string.Equals(Str(c, "aud"), exp.Audience, StringComparison.OrdinalIgnoreCase))
         {
             throw Bad("aud (RP UUID) таарсангүй");
         }
