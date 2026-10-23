@@ -57,7 +57,8 @@ internal static class SignatureAppearance
 
     /// <summary>
     /// Go core.CheckPDFImage (APPEARANCE_SPEC.md §6.1): 1 ≤ W, H ≤ 1600; colour 0–255; 1 ≤ len(Alpha) ≤ 300 KiB; Alpha is one
-    /// zlib stream (Go compress/zlib semantics, valid Adler-32, no trailing bytes) inflating to exactly W·H bytes.
+    /// zlib stream (no preset dictionary — the FDICT bit is rejected even with DICTID 1, valid Adler-32, no trailing bytes)
+    /// inflating to exactly W·H bytes.
     /// </summary>
     public static void CheckImage(ApImage im)
     {
@@ -66,6 +67,7 @@ internal static class SignatureAppearance
         foreach (var c in im.Color)
             if (c is < 0 or > 255) throw new AppearanceException("зураг: өнгө 0…255");
         if (im.Alpha is null || im.Alpha.Length == 0 || im.Alpha.Length > MaxImageAlphaBytes) throw new AppearanceException("зураг: alpha 1 B…300 KiB");
+        if (im.Alpha.Length >= 2 && (im.Alpha[1] & 0x20) != 0) throw new AppearanceException("зураг: alpha preset dictionary (FDICT)");
         int want = im.W * im.H;
         var raw = ZlibStrict.Decode(im.Alpha, want, out int used);
         if (raw is null || raw.Length != want || used != im.Alpha.Length)

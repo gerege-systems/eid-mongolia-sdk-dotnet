@@ -33,6 +33,14 @@ public class AppearanceImageTests
 
     private static PdfImage Stamp() => GoldenImage("stampImage");
 
+    /// <summary>Go fdictAlpha: the same stream with FDICT set and DICTID 1 (empty dictionary) — §6.1 rejects it.</summary>
+    private static byte[] FdictAlpha(byte[] z)
+    {
+        int flg = 0xC0 | 0x20;
+        flg |= (31 - (z[0] * 256 + flg) % 31) % 31;
+        return new byte[] { z[0], (byte)flg, 0, 0, 0, 1 }.Concat(z.Skip(2)).ToArray();
+    }
+
     private static byte[] Zlib(byte[] raw)
     {
         var m = new MemoryStream();
@@ -56,6 +64,7 @@ public class AppearanceImageTests
         yield return new object[] { "alpha дутуу байт", s with { Alpha = Zlib(new byte[s.Width * s.Height - 1]) } };
         yield return new object[] { "alpha ард хог", s with { Alpha = s.Alpha.Append((byte)0).ToArray() } };
         yield return new object[] { "alpha > 300 KiB", s with { Alpha = new byte[(300 << 10) + 1] } };
+        yield return new object[] { "alpha FDICT 1", s with { Alpha = FdictAlpha(s.Alpha) } };
     }
 
     [Theory]

@@ -101,7 +101,7 @@ public sealed record SignatureRegistration
 
     /// <summary>
     /// Дүрслэлд шигтгэсэн зураг бүрийн {kind, sha256} (APPEARANCE_SPEC.md §6.6) — CA зурагчийн/байгууллагын хадгалсан PNG-тэй
-    /// тулгана. Зураггүй бол <c>null</c> (илгээхгүй).
+    /// тулгана (таарахгүй бол 409 <c>IMAGE_MISMATCH</c>). Зураггүй бол <c>null</c> (илгээхгүй).
     /// </summary>
     [JsonPropertyName("images")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

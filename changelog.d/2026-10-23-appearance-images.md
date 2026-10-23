@@ -9,6 +9,8 @@
 - **Яагаад:** Go SDK-ийн APPEARANCE_SPEC §6 / PLACEMENT_SPEC §6c-ийн native порт (Go PR #44), байт-ижил.
 - **Хаана:** `Pdf/SignatureAppearance.cs` (геометр §6.3, content §6.4, объект §6.2), `Pdf/SignatureRevision.cs`,
   `Pdf/ZlibStrict.cs` (ашигласан байтын тоо), `EidPades.cs`, `Models.cs`, `State.cs`, `Registration.cs`; golden
-  `build/go-sdk.ref` → eid-mongolia-sdk-go `79e29f7` (feat/appearance-images; Go PR merge хийгдсэний дараа tag руу шилжүүлнэ).
-- **Шалгасан:** `dotnet test` (net8.0, macOS) — 220/220, golden v10-ийн `img-*` 7 тохиолдол бүгд байт-ижил (v9 хэвээр);
-  `AppearanceImageTests` — 13 буруу оролт, анхдагч хэмжээ, бүртгэлийн `images`. `dotnet format --verify-no-changes` цэвэр.
+  `build/go-sdk.ref` → eid-mongolia-sdk-go v0.16.0 (`81402d6`).
+- **alpha FDICT** — FLG-ийн FDICT бит тавигдсан alpha (DICTID = 1 ч) `REQUEST_INVALID` (Go v0.16.0-тэй ижил); README ба
+  `SignatureRegistration.Images`-д 409 `IMAGE_MISMATCH` (CA одоогийн зурагтай таарахгүй).
+- **Шалгасан:** `dotnet test` (net8.0, macOS) — 221/221, golden v10-ийн `img-*` 7 тохиолдол бүгд байт-ижил (v9 хэвээр);
+  `AppearanceImageTests` — 14 буруу оролт (`alpha FDICT 1` орсон), анхдагч хэмжээ, бүртгэлийн `images`. `dotnet format --verify-no-changes` цэвэр.
