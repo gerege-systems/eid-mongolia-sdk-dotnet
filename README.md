@@ -189,7 +189,7 @@ catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationInvalid) { 
 `sid` = session, `nonce` = таны nonce (өгөөгүй бол SDK-ийн rpChallenge), `iat` ≤ одоо+60 с ба ≥ одоо−10 мин,
 `attrs` ∪ `unavailable` = хүссэн аттрибутууд яг (илүү/дутуу → татгалзана), аттрибут бүрийн төрөл (bool, E.164,
 YYYY-MM-DD, {surname, givenName}). Токен нэг удаагийн, 120 с; хариунд гэрчилгээ, person блок, иргэний дугаар
-(`civil_id` хүсээгүй бол) ирэхгүй. `sub` — энэ RP-д зориулсан тогтмол pairwise id. CA-ийн бусад код (`code`): 400 `REQUEST_INVALID` (үл мэдэгдэх талбар ч), 403 `PERMISSION_DENIED` / `RP_REQUIRED`, 429 `RATE_LIMITED`, 503 `QR_UNAVAILABLE` (түр), 410 `QR_SUBJECT_GONE` (ховор). `aud` том/жижиг үсэг ялгахгүй тулгана (CA жижиг үсгээр бичнэ). Хадгалсан JWS-ийг сүлжээгүй дахин шалгах: `EidQr.VerifyPresentation(jws, jwksJson, new QrExpect { … })`.
+(`civil_id` хүсээгүй бол) ирэхгүй. `sub` — энэ RP-д зориулсан тогтмол pairwise id. CA-ийн бусад код (`code`): 400 `REQUEST_INVALID` (үл мэдэгдэх талбар ч), 403 `PERMISSION_DENIED` / `RP_REQUIRED`, 429 `RATE_LIMITED`, 503 `QR_UNAVAILABLE` (түр), 410 `QR_PRESENTATION_EXPIRED` (session-ийн үр дүнг иргэн зөвшөөрснөөс хойш 10 минутын дотор л уншина), 410 `QR_SUBJECT_GONE` (ховор); RP-ийн эрх уншилт бүрд дахин шалгагдана (хураагдвал 403). `aud` том/жижиг үсэг ялгахгүй тулгана (CA жижиг үсгээр бичнэ). Хадгалсан JWS-ийг сүлжээгүй дахин шалгах: `EidQr.VerifyPresentation(jws, jwksJson, new QrExpect { … })`.
 
 ## Хөгжүүлэлт
 
