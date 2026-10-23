@@ -151,7 +151,8 @@ public sealed class EidQrClient : IDisposable
     /// <summary>
     /// Session дуустал long-poll хийж presentation-ийг CA-ийн JWKS-ээр шалгана. Татгалзсан / хугацаа дууссан бол
     /// <c>SESSION_FAILED</c> (<see cref="EidQrException.EndResult"/>); шалгалт унавал <c>QR_PRESENTATION_INVALID</c>
-    /// (ИТГЭХГҮЙ); JWKS татагдахгүй бол <c>QR_JWKS_UNAVAILABLE</c> (дахин оролдож болно).
+    /// (ИТГЭХГҮЙ); JWKS татагдахгүй бол <c>QR_JWKS_UNAVAILABLE</c> (дахин оролдож болно); <paramref name="maxWait"/>
+    /// дуусахад иргэн хараахан хариулаагүй бол <c>QR_PENDING</c> (CA-ийн session идэвхтэй — дахин дуудаж болно).
     /// </summary>
     /// <param name="session">StartAsync-ийн хариу.</param>
     /// <param name="maxWait">null бол session.ExpiresAt + 15 с, тэр нь ч алга бол 600 с.</param>
@@ -168,31 +169,50 @@ public sealed class EidQrClient : IDisposable
             var remaining = deadline - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero)
             {
-                throw new EidQrException(EidQrErrorCodes.SessionFailed, "session хугацаа дууссан") { EndResult = "TIMEOUT" };
+                throw new EidQrException(EidQrErrorCodes.Pending, "иргэн хараахан хариулаагүй");
             }
             var poll = remaining < ServerPoll ? (remaining < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : remaining) : ServerPoll;
-            var url = _base + "/session/" + Uri.EscapeDataString(session.SessionId) + "?timeoutMs=" + (long)poll.TotalMilliseconds;
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            using var doc = await SendAsync(req, poll + TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
-            var r = doc.RootElement;
-            if (!r.TryGetProperty("state", out var st) || st.GetString() != "COMPLETE")
+            var jws = await PollOnceAsync(session, poll, cancellationToken).ConfigureAwait(false);
+            if (jws is not null)
             {
-                continue;
+                return await VerifyAsync(jws, session, cancellationToken).ConfigureAwait(false);
             }
-            var end = r.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
-                res.TryGetProperty("endResult", out var er) && er.ValueKind == JsonValueKind.String ? er.GetString() : null;
-            if (end != "OK")
-            {
-                throw new EidQrException(EidQrErrorCodes.SessionFailed, "session амжилтгүй: " + end) { EndResult = end ?? "UNKNOWN" };
-            }
-            var jws = r.TryGetProperty("presentation", out var p) && p.ValueKind == JsonValueKind.Object &&
-                p.TryGetProperty("jws", out var j) && j.ValueKind == JsonValueKind.String ? j.GetString() : null;
-            if (string.IsNullOrEmpty(jws))
-            {
-                throw EidQr.Bad("хариунд presentation алга");
-            }
-            return await VerifyAsync(jws, session, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Нэг удаагийн шалгалт (polling UI-д): <c>GET /session/{id}</c> (<paramref name="serverPoll"/> хүртэл, анхдагч 1 с).
+    /// Иргэн хараахан хариулаагүй бол <c>QrCheck.Complete == false</c>; зөвшөөрсөн бол шалгасан presentation. Татгалзсан /
+    /// CA-ийн хугацаа дууссан бол <c>SESSION_FAILED</c>; бусад алдаа <see cref="ResultAsync"/>-тэй ижил.
+    /// </summary>
+    public async Task<QrCheck> CheckAsync(QrSession session, TimeSpan? serverPoll = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var poll = serverPoll is { } p && p > TimeSpan.Zero ? p : TimeSpan.FromSeconds(1);
+        var jws = await PollOnceAsync(session, poll, cancellationToken).ConfigureAwait(false);
+        return jws is null ? new QrCheck(false, null) : new QrCheck(true, await VerifyAsync(jws, session, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Нэг poll: RUNNING бол null; COMPLETE+OK бол presentation JWS; бусад COMPLETE бол SESSION_FAILED.</summary>
+    private async Task<string?> PollOnceAsync(QrSession session, TimeSpan poll, CancellationToken ct)
+    {
+        var url = _base + "/session/" + Uri.EscapeDataString(session.SessionId) + "?timeoutMs=" + (long)poll.TotalMilliseconds;
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        using var doc = await SendAsync(req, poll + TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        var r = doc.RootElement;
+        if (!r.TryGetProperty("state", out var st) || st.ValueKind != JsonValueKind.String || st.GetString() != "COMPLETE")
+        {
+            return null;
+        }
+        var end = r.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.Object &&
+            res.TryGetProperty("endResult", out var er) && er.ValueKind == JsonValueKind.String ? er.GetString() : null;
+        if (end != "OK")
+        {
+            throw new EidQrException(EidQrErrorCodes.SessionFailed, "session амжилтгүй: " + end) { EndResult = end ?? "UNKNOWN" };
+        }
+        var jws = r.TryGetProperty("presentation", out var pr) && pr.ValueKind == JsonValueKind.Object &&
+            pr.TryGetProperty("jws", out var j) && j.ValueKind == JsonValueKind.String ? j.GetString() : null;
+        return string.IsNullOrEmpty(jws) ? throw EidQr.Bad("хариунд presentation алга") : jws;
     }
 
     /// <summary>Хадгалсан presentation JWS-ийг QrSession-тэй тулгаж шалгана (JWKS кэш; танихгүй kid → нэг удаа дахин татна).</summary>

@@ -362,6 +362,8 @@ public static class EidQrErrorCodes
     public const string PresentationInvalid = "QR_PRESENTATION_INVALID";
     /// <summary>CA-ийн JWKS татагдсангүй (түр; дахин оролдож болно).</summary>
     public const string JwksUnavailable = "QR_JWKS_UNAVAILABLE";
+    /// <summary>ResultAsync-ийн хүлээх хугацаа дууссан ч иргэн хараахан хариулаагүй (CA-ийн session идэвхтэй) — дахин Result / Check.</summary>
+    public const string Pending = "QR_PENDING";
     /// <summary>Session амжилтгүй (<see cref="EidQrException.EndResult"/>: USER_REFUSED, TIMEOUT г.м.).</summary>
     public const string SessionFailed = "SESSION_FAILED";
     /// <summary>RP-API-ийн бусад HTTP алдаа (серверийн code-гүй); <see cref="EidQrException.HttpStatus"/>-г үз.</summary>
@@ -419,6 +421,11 @@ public sealed class QrSession
     /// <summary>CA-ийн session дуусах мөч (байвал).</summary>
     [JsonPropertyName("expiresAt")] public DateTimeOffset? ExpiresAt { get; init; }
 }
+
+/// <summary><see cref="EidQrClient.CheckAsync"/>-ийн хариу.</summary>
+/// <param name="Complete">false бол иргэн хараахан хариулаагүй.</param>
+/// <param name="Presentation">Complete бол шалгасан presentation.</param>
+public sealed record QrCheck(bool Complete, QrPresentation? Presentation);
 
 /// <summary>full_name аттрибут (кирилл).</summary>
 public sealed record QrFullName(string Surname, string GivenName);

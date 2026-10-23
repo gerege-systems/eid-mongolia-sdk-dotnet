@@ -268,6 +268,17 @@ public class QrTests
         s.Mutate = null;
         var replay = new QrSession { SessionId = sess.SessionId, Nonce = "replayed", Attributes = sess.Attributes };
         Assert.Equal(EidQrErrorCodes.PresentationInvalid, (await Assert.ThrowsAsync<EidQrException>(() => c.ResultAsync(replay, wait))).Code);
+        s.End = "TIMEOUT";
+        ex = await Assert.ThrowsAsync<EidQrException>(() => c.CheckAsync(sess));
+        Assert.Equal((EidQrErrorCodes.SessionFailed, "TIMEOUT"), (ex.Code, ex.EndResult));
+        s.End = "OK";
+        s.State = "RUNNING";
+        Assert.Equal(EidQrErrorCodes.Pending, (await Assert.ThrowsAsync<EidQrException>(() => c.ResultAsync(sess, TimeSpan.FromSeconds(1)))).Code);
+        Assert.Equal(new QrCheck(false, null), await c.CheckAsync(sess));
+        s.State = "COMPLETE";
+        var done = await c.CheckAsync(sess);
+        Assert.True(done.Complete);
+        Assert.True(done.Presentation!.Attrs.AgeOver18);
     }
 
     [Theory]
