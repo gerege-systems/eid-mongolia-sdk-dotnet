@@ -2,6 +2,25 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.9.0 — 2026-10-23
+
+### Added — харагдах гарын үсэгт гарын үсгийн / байгууллагын тамганы зураг (golden v10)
+
+- **Юу:** `Appearance.SignatureImage`, `Appearance.StampImage` (`PdfImage { Width, Height, Color, Alpha, Sha256 }`) —
+  зураг widget-ийн `/AP /N` form дотор (1×1 DeviceRGB base + W×H /SMask, alpha нь оролтын zlib байтаар — runtime
+  шахалт үгүй). `Width` = `Height` = 0 → анхдагч хэмжээ 220×64 / 220×110 / 240×147.5 (`EidPades.Default*Stamp*`),
+  Prepare ба `SuggestPlacement` хоёуланд. Оролтын шалгалт (хэмжээ 1…1600, өнгө 0…255, alpha ≤ 300 KiB, нэг zlib stream
+  яг W·H байт, ард нь илүү байтгүй, sha256 жижиг hex) → `REQUEST_INVALID`; `StampImage` нь `ClaimedRole`-гүй бол
+  Prepare-д `REQUEST_INVALID`. `Completed.Images` → `SignatureRegistration.Images` (`images`, зураггүй бол талбаргүй).
+- **Яагаад:** Go SDK-ийн APPEARANCE_SPEC §6 / PLACEMENT_SPEC §6c-ийн native порт (Go PR #44), байт-ижил.
+- **Хаана:** `Pdf/SignatureAppearance.cs` (геометр §6.3, content §6.4, объект §6.2), `Pdf/SignatureRevision.cs`,
+  `Pdf/ZlibStrict.cs` (ашигласан байтын тоо), `EidPades.cs`, `Models.cs`, `State.cs`, `Registration.cs`; golden
+  `build/go-sdk.ref` → eid-mongolia-sdk-go v0.16.0 (`81402d6`).
+- **alpha FDICT** — FLG-ийн FDICT бит тавигдсан alpha (DICTID = 1 ч) `REQUEST_INVALID` (Go v0.16.0-тэй ижил); README ба
+  `SignatureRegistration.Images`-д 409 `IMAGE_MISMATCH` (CA одоогийн зурагтай таарахгүй).
+- **Шалгасан:** `dotnet test` (net8.0, macOS) — 221/221, golden v10-ийн `img-*` 7 тохиолдол бүгд байт-ижил (v9 хэвээр);
+  `AppearanceImageTests` — 14 буруу оролт (`alpha FDICT 1` орсон), анхдагч хэмжээ, бүртгэлийн `images`. `dotnet format --verify-no-changes` цэвэр.
+
 ## 0.8.1 — 2026-10-21
 
 ### Fixed — PDF lexer: массив доторх `endobj` дээр мөнхийн давталт
