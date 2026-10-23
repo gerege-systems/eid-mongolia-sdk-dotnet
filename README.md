@@ -23,7 +23,7 @@ xref, CMS, TSA/OCSP/CRL хүсэлт, DSS) **байт-ижил** гаргадг�
 [nuget.org](https://www.nuget.org/packages/GeregeSystems.EidMongolia.Pades)-оос:
 
 ```bash
-dotnet add package GeregeSystems.EidMongolia.Pades --version 0.10.0
+dotnet add package GeregeSystems.EidMongolia.Pades --version 0.11.0
 ```
 
 Хувилбар бүрийн `.nupkg` [GitHub Releases](https://github.com/gerege-systems/eid-mongolia-sdk-dotnet/releases)-д мөн бий.
