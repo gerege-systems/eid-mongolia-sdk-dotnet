@@ -142,14 +142,6 @@ var prepared = EidPades.Prepare(pdf, opts with
 (`PDF_FOREIGN_SIGNATURE`…) ба нэр дүрслэлд багтах эсэхийг Prepare л шалгана. Page 0: гарын үсэгтэй баримтад verify
 хуудасны холбоосын docId-оор verify хуудсуудыг алгасна; гарын үсэггүй баримтад юуг ч алгасахгүй (сүүлийн хуудас).
 
-**Зураг** (golden v10, APPEARANCE_SPEC §6). `Appearance.SignatureImage` (иргэний гарын үсгийн зураг) ба
-`Appearance.StampImage` (байгууллагын тамга — зөвхөн `ClaimedRole`/onBehalfOf-той) — `PdfImage { Width, Height, Color
-[r, g, b], Alpha (zlib), Sha256 }`, CA-ийн өгөх «PDF зураг» (PNG биш; `System.Text.Json`-оор шууд задарна, alpha нь
-base64). Зураг дүрслэлийн ДОТОР зурагдана (alpha нь байтаар нь /SMask болно — runtime шахалт үгүй). `Width` = `Height` = 0
-бол анхдагч хэмжээ: 220×64 / гарын үсэгтэй 220×110 / тамгатай 240×147.5 (тамганы дээш гарах хэсэг орсон) — Prepare ба
-`SuggestPlacement` хоёуланд. Зургийн sha256 `Completed.Images` → `Registration` → `images`; CA одоогийн хадгалсан
-зурагтай тулгана — таарахгүй (солигдсон/устгасан) бол 409 `IMAGE_MISMATCH`.
-
 Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар (#2a/#2b бүтэц, #4 `/Encrypt` лавлагаа
 эсвэл шууд толь). `CompleteAsync`-ийн OCSP нь гэрчилгээний CertID (олгогчийн нэр/түлхүүрийн hash + serial)-тай, CRL нь
 олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол

@@ -81,9 +81,6 @@ public class GoldenTests
                 Height = ap.GetProperty("height").GetDouble(),
                 Lang = Str(ap, "lang"),
                 Exact = ap.TryGetProperty("exact", out var ex) && ex.GetBoolean(),
-                // golden v10 (APPEARANCE_SPEC.md §6): the images inline, as Go pades.PDFImage JSON.
-                SignatureImage = ap.TryGetProperty("signatureImage", out var si) ? JsonSerializer.Deserialize<PdfImage>(si.GetRawText()) : null,
-                StampImage = ap.TryGetProperty("stampImage", out var ti) ? JsonSerializer.Deserialize<PdfImage>(ti.GetRawText()) : null,
             } : null,
         };
 
@@ -189,13 +186,6 @@ public class GoldenTests
             Assert.Equal(priorRev, reg.PriorSignatures.Select(x => x.RevisionSha256).ToArray());
             Assert.Equal(done.RevIndex == 1 ? done.PageSha256 : null, reg.PageSha256);
             Assert.Equal("PNOMN-00000000000", reg.SignerEtsi);
-            // APPEARANCE_SPEC.md §6.6: the drawn images' {kind, sha256}, signature then stamp; no field without images.
-            var images = new List<PdfSignatureImage>();
-            if (opts.Appearance?.SignatureImage is { } sigImg) images.Add(new PdfSignatureImage("signature", sigImg.Sha256));
-            if (opts.Appearance?.StampImage is { } stampImg) images.Add(new PdfSignatureImage("stamp", stampImg.Sha256));
-            Assert.Equal(images, done.Images);
-            Assert.Equal(images.Count > 0 ? images : null, reg.Images?.ToList());
-            Assert.Equal(images.Count > 0, json.Contains("\"images\":", StringComparison.Ordinal));
         }
     }
 

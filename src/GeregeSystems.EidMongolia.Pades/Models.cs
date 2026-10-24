@@ -90,69 +90,6 @@ public sealed record Appearance
     /// зөвхөн илүүд үзэх байрлал (өмнөхтэй байт-ижил).
     /// </summary>
     public bool Exact { get; init; }
-
-    /// <summary>
-    /// Иргэний гарын үсгийн зураг (CA: <c>GET /v3/person/etsi/{etsi}/signature-image</c>) — дүрслэлийн дотор зурна
-    /// (APPEARANCE_SPEC.md §6). <c>null</c> = байхгүй (golden v9-тэй байт-ижил).
-    /// </summary>
-    public PdfImage? SignatureImage { get; init; }
-
-    /// <summary>
-    /// Байгууллагын тамганы зураг (CA: <c>representations[].stampImage</c>) — зөвхөн <see cref="PrepareOptions.ClaimedRole"/>
-    /// (onBehalfOf)-той, эс бөгөөс REQUEST_INVALID. Дугуй тамга хайрцгийн баруун дээд буланд, дээш нь гарч зурагдана —
-    /// <see cref="Width"/>/<see cref="Height"/> нь widget-ийн бүтэн тэгш өнцөгт (APPEARANCE_SPEC.md §6.3).
-    /// <see cref="Width"/> = <see cref="Height"/> = 0 бол анхдагч хэмжээ: 220 × 64, гарын үсгийн зурагтай 220 × 110, тамгатай
-    /// 240 × 147.5 (<see cref="EidPades.DefaultStampWidth"/>…).
-    /// </summary>
-    public PdfImage? StampImage { get; init; }
-}
-
-/// <summary>
-/// CA-ийн өгөх «PDF зураг» (Go <c>pades.PDFImage</c>, APPEARANCE_SPEC.md §6.1): ганц бэхний өнгө + 8 битийн alpha. SDK
-/// <see cref="Alpha"/>-г PDF-д байтаар нь (/SMask, /FlateDecode) бичнэ — runtime шахалт үгүй.
-/// </summary>
-public sealed record PdfImage
-{
-    /// <summary>Өргөн, px (1…1600).</summary>
-    [JsonPropertyName("width")]
-    public int Width { get; init; }
-
-    /// <summary>Өндөр, px (1…1600).</summary>
-    [JsonPropertyName("height")]
-    public int Height { get; init; }
-
-    /// <summary>[r, g, b], тус бүр 0…255.</summary>
-    [JsonPropertyName("color")]
-    public int[] Color { get; init; } = Array.Empty<int>();
-
-    /// <summary>
-    /// zlib stream (RFC 1950; stream-ийн ард илүү байт үгүй) — задлахад яг <see cref="Width"/>·<see cref="Height"/> байт,
-    /// мөр дээрээс доош, PNG filter байтгүй; ≤ 300 KiB. JSON: base64.
-    /// </summary>
-    [JsonPropertyName("alpha")]
-    public byte[] Alpha { get; init; } = Array.Empty<byte>();
-
-    /// <summary>
-    /// CA-ийн хадгалсан PNG-ийн SHA-256 (64 жижиг hex) — PDF-д бичигдэхгүй, бүртгэлд очно
-    /// (<see cref="Completed.Images"/> → <see cref="SignatureRegistration.Images"/>).
-    /// </summary>
-    [JsonPropertyName("sha256")]
-    public string Sha256 { get; init; } = "";
-}
-
-/// <summary>
-/// Дүрслэлд шигтгэсэн нэг зураг (Go <c>eid.PDFSignatureImage</c>): <see cref="Kind"/> = <c>signature</c> | <c>stamp</c>,
-/// <see cref="Sha256"/> = CA-ийн хадгалсан PNG-ийн SHA-256.
-/// </summary>
-public sealed record PdfSignatureImage(
-    [property: JsonPropertyName("kind")] string Kind,
-    [property: JsonPropertyName("sha256")] string Sha256)
-{
-    /// <summary>Иргэний гарын үсгийн зураг.</summary>
-    public const string KindSignature = "signature";
-
-    /// <summary>Байгууллагын тамганы зураг.</summary>
-    public const string KindStamp = "stamp";
 }
 
 /// <summary><see cref="EidPades.CompleteAsync"/>-ийн сонголт.</summary>
@@ -375,10 +312,4 @@ public sealed record Completed
     /// <see cref="EidPades.Registration"/>-д <see cref="RegistrationOptions.OnBehalfOf"/> заавал.
     /// </summary>
     public string ClaimedRole { get; init; } = "";
-
-    /// <summary>
-    /// Энэ гарын үсгийн дүрслэлд зурсан зургууд (<see cref="Appearance.SignatureImage"/>, дараа нь <see cref="Appearance.StampImage"/>);
-    /// <see cref="EidPades.Registration"/> тэдгээрийг <c>images</c> болгон илгээнэ (APPEARANCE_SPEC.md §6.6). Зураггүй бол хоосон.
-    /// </summary>
-    public IReadOnlyList<PdfSignatureImage> Images { get; init; } = Array.Empty<PdfSignatureImage>();
 }

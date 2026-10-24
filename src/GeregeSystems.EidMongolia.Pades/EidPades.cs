@@ -93,8 +93,6 @@ public static partial class EidPades
             throw new EidPadesException("REQUEST_INVALID", "verifyPagePosition: last | first");
         bool first = options.VerifyPagePosition == "first";
         CheckAppearance(options);
-        if (options.Appearance?.StampImage is not null && string.IsNullOrEmpty(options.ClaimedRole))
-            throw new EidPadesException("REQUEST_INVALID", "appearance: stampImage зөвхөн claimedRole (onBehalfOf)-той");
         var now = (options.SigningTime ?? DateTimeOffset.UtcNow).ToOffset(SigningZone);
 
         var inHex = PrepState.Hex(SHA256.HashData(pdf));
@@ -160,7 +158,6 @@ public static partial class EidPades
             PageSha256 = pageHex,
             ClaimedRole = options.ClaimedRole ?? "",
             FileName = fileName ?? "",
-            Images = ImageRefs(options.Appearance),
             Pdf = prep.Pdf,
             PreparedSha256 = PrepState.Hex(SHA256.HashData(prep.Pdf)),
         };
@@ -220,8 +217,7 @@ public static partial class EidPades
         }
         var verifyUri = "";
         if (sigs.Count > 0 && Prechecks.DocIdFromPage(pdf) is { Length: > 0 } id) verifyUri = PageVerifyUrl + id;
-        var (aw, ah) = AppearanceSize(appearance);
-        long w = SignatureAppearance.Round100(aw), h = SignatureAppearance.Round100(ah);
+        long w = SignatureAppearance.Round100(appearance.Width), h = SignatureAppearance.Round100(appearance.Height);
         int page;
         PlaceResult pl;
         (long W, long H)?[] sizes;
@@ -375,7 +371,6 @@ public static partial class EidPades
             PriorCmsSha256 = prior,
             PriorRevisionSha256 = priorRev,
             ClaimedRole = st.ClaimedRole,
-            Images = st.Images.ToArray(),
         };
     }
 
@@ -420,50 +415,6 @@ public static partial class EidPades
         if (a.Page < 0) throw Bad("page ≥ 0");
         if (!string.IsNullOrEmpty(a.Lang) && a.Lang is not ("mn" or "en")) throw Bad("lang: mn | en");
         if (!string.IsNullOrEmpty(o.ClaimedRole) && !RoleText(o.ClaimedRole)) throw Bad("claimedRole-д удирдах тэмдэгт");
-        foreach (var (name, im) in new[] { ("signatureImage", a.SignatureImage), ("stampImage", a.StampImage) })
-        {
-            if (im is null) continue;
-            if (im.Sha256 is null || !Sha256Re.IsMatch(im.Sha256)) throw Bad(name + ".sha256: жижиг hex SHA-256");
-            try
-            {
-                SignatureAppearance.CheckImage(ToApImage(im)!);
-            }
-            catch (AppearanceException e)
-            {
-                throw new EidPadesException("REQUEST_INVALID", "appearance: " + name + ": " + e.Message, e);
-            }
-        }
-    }
-
-    private static readonly Regex Sha256Re = new("^[0-9a-f]{64}$", RegexOptions.CultureInvariant);
-
-    /// <summary>Анхдагч хэмжээ (pt) — <see cref="Appearance.Width"/> = <see cref="Appearance.Height"/> = 0 үед (APPEARANCE_SPEC.md §6.3): зураггүй.</summary>
-    public const double DefaultStampWidth = 220, DefaultStampHeight = 64;
-
-    /// <summary>Гарын үсгийн зурагтай (тамгагүй) анхдагч хэмжээ, pt.</summary>
-    public const double DefaultSignatureStampWidth = 220, DefaultSignatureStampHeight = 110;
-
-    /// <summary>Тамганы зурагтай (гарын үсэгтэй/үгүй) анхдагч хэмжээ, pt — өндөрт тамганы дээш гарах хэсэг орсон.</summary>
-    public const double DefaultOrgStampWidth = 240, DefaultOrgStampHeight = 147.5;
-
-    /// <summary>Go appearanceSize: Width/Height, эсвэл хоёулаа 0 бол зургаас хамаарах анхдагч хэмжээ.</summary>
-    private static (double W, double H) AppearanceSize(Appearance a)
-    {
-        if (a.Width != 0 || a.Height != 0) return (a.Width, a.Height);
-        if (a.StampImage is not null) return (DefaultOrgStampWidth, DefaultOrgStampHeight);
-        if (a.SignatureImage is not null) return (DefaultSignatureStampWidth, DefaultSignatureStampHeight);
-        return (DefaultStampWidth, DefaultStampHeight);
-    }
-
-    private static ApImage? ToApImage(PdfImage? im) => im is null ? null : new ApImage(im.Width, im.Height, im.Color, im.Alpha);
-
-    /// <summary>Бүртгэлийн зургууд (APPEARANCE_SPEC.md §6.6): signatureImage, дараа нь stampImage — байгаа нь.</summary>
-    private static List<PdfSignatureImage> ImageRefs(Appearance? a)
-    {
-        var l = new List<PdfSignatureImage>();
-        if (a?.SignatureImage is { } s) l.Add(new PdfSignatureImage(PdfSignatureImage.KindSignature, s.Sha256));
-        if (a?.StampImage is { } t) l.Add(new PdfSignatureImage(PdfSignatureImage.KindStamp, t.Sha256));
-        return l;
     }
 
     /// <summary>validator-ийн validClaimedRole-тэй ижил: Cc/Cf үгүй, буруу UTF-16 (ганц surrogate) үгүй.</summary>
@@ -494,12 +445,10 @@ public static partial class EidPades
         if (page > n)
             throw new EidPadesException("REQUEST_INVALID", string.Create(CultureInfo.InvariantCulture, $"appearance: page {page} > хуудасны тоо {n}"));
         var lang = !string.IsNullOrEmpty(a.Lang) ? a.Lang : !string.IsNullOrEmpty(o.Lang) ? o.Lang : "mn";
-        var (w, h) = AppearanceSize(a);
-        return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(w),
-            SignatureAppearance.Round100(h), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
+        return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(a.Width),
+            SignatureAppearance.Round100(a.Height), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
             now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " (+08)",
-            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact,
-            ToApImage(a.SignatureImage), ToApImage(a.StampImage));
+            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact);
     }
 
     /// <summary>DTBS дээрх гарын үсгийг шалгаж CMS-д бичих хэлбэрээр (RSA хэвээр, ECDSA DER) буцаана; таарахгүй бол null.</summary>
