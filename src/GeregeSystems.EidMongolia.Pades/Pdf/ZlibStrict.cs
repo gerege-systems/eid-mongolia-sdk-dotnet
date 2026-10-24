@@ -33,18 +33,11 @@ internal static class ZlibStrict
     }
 
     /// <summary>The decoded bytes, or <c>null</c> when the stream is invalid or decodes to more than <paramref name="maxOut"/> bytes.</summary>
-    public static byte[]? Decode(ReadOnlySpan<byte> src, int maxOut) => Decode(src, maxOut, out _);
-
-    /// <summary>
-    /// <see cref="Decode(ReadOnlySpan{byte}, int)"/> that also reports how many input bytes the stream used (header, deflate
-    /// data, Adler-32) — callers that must reject trailing bytes (APPEARANCE_SPEC.md §6.1) compare it with the input length.
-    /// </summary>
-    public static byte[]? Decode(ReadOnlySpan<byte> src, int maxOut, out int used)
+    public static byte[]? Decode(ReadOnlySpan<byte> src, int maxOut)
     {
-        used = 0;
         try
         {
-            return DecodeCore(src, maxOut, out used);
+            return DecodeCore(src, maxOut);
         }
         catch (DecodeException)
         {
@@ -52,7 +45,7 @@ internal static class ZlibStrict
         }
     }
 
-    private static byte[] DecodeCore(ReadOnlySpan<byte> src, int maxOut, out int used)
+    private static byte[] DecodeCore(ReadOnlySpan<byte> src, int maxOut)
     {
         if (src.Length < 2) throw new DecodeException();
         int cmf = src[0], flg = src[1];
@@ -84,7 +77,6 @@ internal static class ZlibStrict
         uint want = br.ReadUInt32BE();
         var outBytes = output.ToArray();
         if (Adler32(outBytes) != want) throw new DecodeException();
-        used = br.Pos;
         return outBytes;
     }
 
@@ -249,8 +241,6 @@ internal static class ZlibStrict
             _bitCnt -= need;
             return (int)(v & ((1L << need) - 1));
         }
-
-        public int Pos => _pos;
 
         public void AlignToByte()
         {

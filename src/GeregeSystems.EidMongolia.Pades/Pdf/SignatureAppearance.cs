@@ -20,23 +20,10 @@ internal sealed class AppearanceException : Exception
 /// шийдэгдсэн (0 биш); Date — «YYYY-MM-DD HH:MM (+08)»; Url — https://ca.eidmongolia.mn/verify/&lt;docID&gt;/&lt;revIndex&gt;;
 /// Exact — <c>appearance.exact</c> (PLACEMENT_SPEC.md §6a): never moved, the scan only sets the status.
 /// </summary>
-/// Sig, Stamp — the signature / organization-stamp images (APPEARANCE_SPEC.md §6; null = none). Stamp needs Role; W, H is
-/// then the whole widget rect (box + the stamp's overflow above it).
-internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false,
-    ApImage? Sig = null, ApImage? Stamp = null);
+internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false);
 
-/// <summary>
-/// W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270; Sig, Stamp — APPEARANCE_SPEC.md §6
-/// (null = none; both null = the §3 layout, byte-identical to golden v9).
-/// </summary>
-internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url,
-    ApImage? Sig = null, ApImage? Stamp = null);
-
-/// <summary>
-/// Go core.PDFImage (APPEARANCE_SPEC.md §6.1): one ink colour (3 bytes) + an 8-bit alpha channel. Alpha is a zlib stream
-/// that inflates to exactly W·H bytes; it is written into the PDF verbatim as the /SMask stream — never compressed here.
-/// </summary>
-internal sealed record ApImage(int W, int H, int[] Color, byte[] Alpha);
+/// <summary>W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270.</summary>
+internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url);
 
 internal static class SignatureAppearance
 {
@@ -51,68 +38,6 @@ internal static class SignatureAppearance
         ["mn"] = "eID Mongolia-аар зурсан",
         ["en"] = "Signed with eID Mongolia",
     };
-
-    /// <summary>PDF image limits (APPEARANCE_SPEC.md §6.1).</summary>
-    public const int MaxImageSide = 1600, MaxImageAlphaBytes = 300 << 10;
-
-    /// <summary>
-    /// Go core.CheckPDFImage (APPEARANCE_SPEC.md §6.1): 1 ≤ W, H ≤ 1600; colour 0–255; 1 ≤ len(Alpha) ≤ 300 KiB; Alpha is one
-    /// zlib stream (no preset dictionary — the FDICT bit is rejected even with DICTID 1, valid Adler-32, no trailing bytes)
-    /// inflating to exactly W·H bytes.
-    /// </summary>
-    public static void CheckImage(ApImage im)
-    {
-        if (im.W < 1 || im.H < 1 || im.W > MaxImageSide || im.H > MaxImageSide) throw new AppearanceException("зураг: хэмжээ 1…1600 px");
-        if (im.Color is not { Length: 3 }) throw new AppearanceException("зураг: өнгө [r, g, b]");
-        foreach (var c in im.Color)
-            if (c is < 0 or > 255) throw new AppearanceException("зураг: өнгө 0…255");
-        if (im.Alpha is null || im.Alpha.Length == 0 || im.Alpha.Length > MaxImageAlphaBytes) throw new AppearanceException("зураг: alpha 1 B…300 KiB");
-        if (im.Alpha.Length >= 2 && (im.Alpha[1] & 0x20) != 0) throw new AppearanceException("зураг: alpha preset dictionary (FDICT)");
-        int want = im.W * im.H;
-        var raw = ZlibStrict.Decode(im.Alpha, want, out int used);
-        if (raw is null || raw.Length != want || used != im.Alpha.Length)
-            throw new AppearanceException("зураг: alpha нь яг өргөн×өндөр байт биш (эсвэл эвдэрсэн)");
-    }
-
-    /// <summary>APPEARANCE_SPEC.md §6.3 geometry (h100): box height, QR/text row height, image placements [dx dy dw dh] (null = none).</summary>
-    private sealed record ImageLayout(long BoxH, long RowH, long[]? Sig, long[]? Stamp);
-
-    /// <summary>fit-contain (iw × ih px) into bw × bh (h100); the other side floor-scaled, at least 1.</summary>
-    private static (long Dw, long Dh) Fit(long iw, long ih, long bw, long bh) =>
-        iw * bh >= ih * bw ? (bw, Math.Max(1, bw * ih / iw)) : (Math.Max(1, bh * iw / ih), bh);
-
-    private static ImageLayout LayoutImages(AppearanceParams p)
-    {
-        if (p.Sig is null && p.Stamp is null) return new ImageLayout(p.H, p.H, null, null);
-        long boxH = p.Stamp is null ? p.H : p.H * 4 / 5;
-        long band = boxH * 9 / 22;
-        long rowH = boxH - band;
-        long sh = band * 14 / 15, sy = rowH - band * 2 / 15;
-        long sx = (p.W - p.W * 15 / 22) / 2, sw = p.W * 15 / 22;
-        long[]? stamp = null, sig = null;
-        if (p.Stamp is not null)
-        {
-            long d = boxH * 2 / 3;
-            long qx = Math.Min(p.W * 41 / 60 - d / 2, p.W - d);
-            if (qx < 0 || d <= 0) throw new AppearanceException("хэт жижиг (зурагтай дүрслэл)");
-            var (dw, dh) = Fit(p.Stamp.W, p.Stamp.H, d, d);
-            stamp = new[] { qx + (d - dw) / 2, p.H - d + (d - dh) / 2, dw, dh };
-            sx = p.W / 30;
-            sw = qx + d / 2 - sx;
-        }
-        if (p.Sig is not null)
-        {
-            if (sw <= 0 || sh <= 0) throw new AppearanceException("хэт жижиг (зурагтай дүрслэл)");
-            var (dw, dh) = Fit(p.Sig.W, p.Sig.H, sw, sh);
-            long dx = p.Stamp is null ? sx + (sw - dw) / 2 : sx;
-            sig = new[] { dx, sy + (sh - dh) / 2, dw, dh };
-        }
-        return new ImageLayout(boxH, rowH, sig, stamp);
-    }
-
-    /// <summary>`q dw 0 0 dh dx dy cm /&lt;name&gt; Do Q` (APPEARANCE_SPEC.md §6.4).</summary>
-    private static void DrawImage(VerifyPage.Writer w, string name, long[] r) =>
-        w.Op("q " + Num100(r[2]) + " 0 0 " + Num100(r[3]) + " " + Num100(r[0]) + " " + Num100(r[1]) + " cm /" + name + " Do Q");
 
     /// <summary>pt → h100: floor(v × 100 + 0.5).</summary>
     public static long Round100(double v) => (long)Math.Floor(v * 100 + 0.5);
@@ -150,11 +75,6 @@ internal static class SignatureAppearance
         if (!Labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
         if (!VerifyPage.AsciiUrl(p.Url)) throw new AppearanceException("URL ASCII биш");
         if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
-        if (p.Stamp is not null && p.Role == "") throw new AppearanceException("тамгын зураг зөвхөн байгууллагын нэрийн өмнөөс (claimedRole)");
-        if (p.Sig is not null) CheckImage(p.Sig);
-        if (p.Stamp is not null) CheckImage(p.Stamp);
-        var il = LayoutImages(p);
-        long rowH = il.RowH;
         bool[][] m;
         try
         {
@@ -165,13 +85,13 @@ internal static class SignatureAppearance
             throw new AppearanceException(e.Message, e);
         }
         int n = m.Length;
-        long mod = (rowH - 2 * Pad) / n;
+        long mod = (p.H - 2 * Pad) / n;
         if (mod < MinModule) throw new AppearanceException("хэт жижиг (өндөр ≥ " + Num100(2 * Pad + n * MinModule) + " pt)");
         long tx = Pad + mod * n + Gap;
         long tw = p.W - tx - Pad;
         var w = new VerifyPage.Writer(reg, bld);
         List<Line>? lines = null;
-        for (int f = MaxSize; f >= MinSize && lines is null && tw > 0; f--) lines = Layout(w, p, label, f, tw, rowH);
+        for (int f = MaxSize; f >= MinSize && lines is null && tw > 0; f--) lines = Layout(w, p, label, f, tw);
         if (lines is null) throw new AppearanceException("хэт жижиг (бичвэр багтахгүй)");
         long total = 0;
         foreach (var l in lines) total += l.Size * Leading;
@@ -184,14 +104,8 @@ internal static class SignatureAppearance
         }
         w.Op(VerifyPage.ColOk + " RG");
         w.Op("1 w");
-        w.Op("0.5 0.5 " + Num100(p.W - 100) + " " + Num100(il.BoxH - 100) + " re S");
-        if (p.Sig is not null || p.Stamp is not null)
-        {
-            w.Op("0.5 w");
-            w.Op("0 " + Num100(rowH) + " m " + Num100(p.W) + " " + Num100(rowH) + " l S");
-        }
-        if (il.Sig is not null) DrawImage(w, "Sig", il.Sig);
-        w.Op("q " + Num100(mod) + " 0 0 " + Num100(mod) + " " + Num100(Pad) + " " + Num100((rowH - mod * n) / 2) + " cm");
+        w.Op("0.5 0.5 " + Num100(p.W - 100) + " " + Num100(p.H - 100) + " re S");
+        w.Op("q " + Num100(mod) + " 0 0 " + Num100(mod) + " " + Num100(Pad) + " " + Num100((p.H - mod * n) / 2) + " cm");
         w.Op("0 0 0 rg");
         for (int r = 0; r < n; r++)
         {
@@ -209,7 +123,7 @@ internal static class SignatureAppearance
         }
         w.Op("f");
         w.Op("Q");
-        long cursor = rowH - Pad - (rowH - 2 * Pad - total) / 2;
+        long cursor = p.H - Pad - (p.H - 2 * Pad - total) / 2;
         foreach (var l in lines)
         {
             cursor -= l.Size * Leading;
@@ -217,13 +131,12 @@ internal static class SignatureAppearance
             w.Op(string.Create(CultureInfo.InvariantCulture,
                 $"BT /F{l.Font} {l.Size} Tf {Num100(tx)} {Num100(cursor + l.Size * Descent)} Td {w.GlyphHex(l.Font, l.Text)} Tj ET"));
         }
-        if (il.Stamp is not null) DrawImage(w, "Stamp", il.Stamp);
         if (cm != "") w.Op("Q");
         w.Op("EMC");
         return Latin1.ToBytes(w.Ops.ToString());
     }
 
-    private static List<Line>? Layout(VerifyPage.Writer w, AppearanceParams p, string label, int f, long tw, long rowH)
+    private static List<Line>? Layout(VerifyPage.Writer w, AppearanceParams p, string label, int f, long tw)
     {
         int b = f - BodyDelta;
         int limit = checked((int)(tw * 10)); // h100 → 1/1000 pt; tw ≤ 1440000
@@ -239,50 +152,24 @@ internal static class SignatureAppearance
             if (l.Text == "" || w.Width1000(l.Font, l.Size, l.Text) > limit) return null;
             total += l.Size * Leading;
         }
-        return total > rowH - 2 * Pad ? null : lines;
+        return total > p.H - 2 * Pad ? null : lines;
     }
 
-    /// <summary>The number of objects <see cref="Objects"/> writes: 11 (form, F1 ×5, F2 ×5) + 2 per image.</summary>
-    public static int ObjectCount(ApImage? sig, ApImage? stamp) => 11 + (sig is null ? 0 : 2) + (stamp is null ? 0 : 2);
-
-    /// <summary>
-    /// /AP /N form XObject ба түүний 2 фонт (11 объект) + зураг бүрд 2 (APPEARANCE_SPEC.md §6.2): ids = [form, F1 ×5, F2 ×5,
-    /// (Sig base, Sig mask), (Stamp base, Stamp mask)]. Буцаах нь объектын бие (ids-ийн дарааллаар).
-    /// </summary>
+    /// <summary>/AP /N form XObject ба түүний 2 фонт (11 объект): ids = [form, F1 ×5, F2 ×5]. Буцаах нь объектын бие.</summary>
     public static byte[][] Objects(AppearanceParams p, uint[] ids)
     {
-        if (ids.Length != ObjectCount(p.Sig, p.Stamp)) throw new AppearanceException("объектын тоо");
         var reg = PageFont.Regular.Value;
         var bld = PageFont.Bold.Value;
         var (_, bw, bh) = Rotation(p.Rotate, p.W, p.H);
         var content = Content(p, reg, bld);
-        var res = "/Font << /F1 " + ids[1].ToString(CultureInfo.InvariantCulture) + " 0 R /F2 " + ids[6].ToString(CultureInfo.InvariantCulture) + " 0 R >>";
-        var imgs = new List<byte[]>();
-        if (p.Sig is not null || p.Stamp is not null)
-        {
-            res += " /XObject <<";
-            int next = 11;
-            foreach (var (name, im) in new[] { ("Sig", p.Sig), ("Stamp", p.Stamp) })
-            {
-                if (im is null) continue;
-                uint baseId = ids[next], maskId = ids[next + 1];
-                next += 2;
-                res += " /" + name + " " + baseId.ToString(CultureInfo.InvariantCulture) + " 0 R";
-                imgs.Add(VerifyPage.StreamObj(" /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask " +
-                                              maskId.ToString(CultureInfo.InvariantCulture) + " 0 R",
-                    new[] { (byte)im.Color[0], (byte)im.Color[1], (byte)im.Color[2] }));
-                imgs.Add(VerifyPage.StreamObj(string.Create(CultureInfo.InvariantCulture,
-                    $" /Type /XObject /Subtype /Image /Width {im.W} /Height {im.H} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode"), im.Alpha));
-            }
-            res += " >>";
-        }
         var o = new List<byte[]>(ids.Length)
         {
-            VerifyPage.StreamObj(" /Type /XObject /Subtype /Form /BBox [0 0 " + Num100(bw) + " " + Num100(bh) + "] /Resources << " + res + " >>", content),
+            VerifyPage.StreamObj(" /Type /XObject /Subtype /Form /BBox [0 0 " + Num100(bw) + " " + Num100(bh) + "] /Resources << /Font << /F1 " +
+                                 ids[1].ToString(CultureInfo.InvariantCulture) + " 0 R /F2 " + ids[6].ToString(CultureInfo.InvariantCulture) +
+                                 " 0 R >> >>", content),
         };
         o.AddRange(VerifyPage.FontBodies(ids[1..6], reg));
         o.AddRange(VerifyPage.FontBodies(ids[6..11], bld));
-        o.AddRange(imgs);
         return o.ToArray();
     }
 
