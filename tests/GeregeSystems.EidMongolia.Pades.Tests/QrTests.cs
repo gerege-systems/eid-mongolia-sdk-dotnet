@@ -25,7 +25,7 @@ namespace GeregeSystems.EidMongolia.Pades.Tests;
 public class QrTests
 {
     /// <summary>CA репогийн myqr_vectors.json-ийн SHA-256 — файлыг хуулахдаа энд тогтооно (хоосон = хараахан ирээгүй).</summary>
-    private const string MYQR_VECTORS_SHA256 = "";
+    private const string MYQR_VECTORS_SHA256 = "7620ad6a14bd337cd8ccb94d2d27e8f82189f5ac3ec6ece9542f8f2922b92eab";
 
     private const string RpUuid = "6f1c2a9e-1b7d-4c2e-9a51-3d8e5b7c9f01";
     private const string Sid = "3f0d4a52-8e1b-4f6a-b0c7-2d9e1a5b7c33";
