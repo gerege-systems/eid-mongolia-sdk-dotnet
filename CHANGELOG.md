@@ -2,6 +2,24 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.13.0 — 2026-10-26
+
+### Changed (BREAKING) — «Миний QR»: иргэний PIN2-оор зурсан «Миний мэдээлэл» (PS256 JWS)
+
+- **Юу:** `GeregeSystems.EidMongolia.Qr` бүрэн солигдов. `EidQrClient.StartAsync(QrStartRequest(Qr, Nonce?, RelyingPartyName?))`
+  → `POST /authentication/qr` `{qr, relyingPartyUUID, relyingPartyName, nonce}` (nonce өгөөгүй бол base64url(16 байт) =
+  22 тэмдэгт) → `QrSession(SessionId, Nonce)`; `ResultAsync` / `CheckAsync` → `QrResult(Jws, Claims, Data, Source,
+  Photo, Signer, SignedAt, Sha256)`; `EidQr.VerifyAsync(jws, QrExpect, QrTrust?)` — гэрээний §6.1 (header PS256 /
+  `eidmn-myqr+jwt` / `x5c`, `X509Chain` CustomRootTrust, QcCompliance + contentCommitment + олгогч SKI + RSA ≥ 2048,
+  OCSP hard-fail эсвэл `QrTrust.Revocation`, RSASSA-PSS, claims, `data` хязгаар). Шинэ кодууд `QR_JWS_MALFORMED` …
+  `QR_PRESENTATION_GONE` (410). Хуучин аттрибут/ES256/JWKS API (QrAttributes, QrPresentation, VerifyPresentation,
+  JwksUrl, MaxAge) хасагдав — хэрэглэгчгүй байсан.
+- **Яагаад:** CA гэрээ `myqr-2026-10-26` (эзний шийдвэр: хувилбаржуулалтгүй, шууд солих).
+- **Хаана:** `src/…/Qr/EidQr.cs`, `src/…/Qr/EidQrClient.cs`, `tests/…/QrTests.cs` (`testdata/qr_vectors.json` устгасан),
+  README, csproj тайлбар. CA-ийн `testdata/myqr_vectors.json` (902e0b4e) хуулагдаж SHA-256 `MYQR_VECTORS_SHA256`-д бэхлэгдсэн — бүх кейс давсан.
+- **Шалгасан:** `dotnet test` 215/215 (macOS, .NET 8.0.427), `dotnet format --verify-no-changes`; тест дотор үүсгэсэн
+  PKI дээр §7-ийн кейсүүд (+ хил), stub RP-API (body, nonce 22, 404/403/409/410, USER_REFUSED, QR_PENDING).
+
 ## 0.12.0 — 2026-10-24
 
 ### Removed (BREAKING) — гарын үсгийн зураг / байгууллагын тамганы зураг
