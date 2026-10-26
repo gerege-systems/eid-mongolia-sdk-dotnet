@@ -12,7 +12,7 @@
     <PackageId>GeregeSystems.EidMongolia.Pades</PackageId>
     <Authors>Gerege Systems LLC</Authors>
     <Company>Gerege Systems LLC</Company>
-    <Description>eID Mongolia client-side PAdES for .NET (PDF never leaves the client): Prepare → citizen signs the 32-byte DTBS on phone/token → CompleteAsync (RFC 3161 TSA, OCSP/CRL, DSS). Native C# port of the Go reference, byte-identical output. Also: «My QR» RP client (GeregeSystems.EidMongolia.Qr) — verified CA attribute presentations (ES256 JWS/JWKS).</Description>
+    <Description>eID Mongolia client-side PAdES for .NET (PDF never leaves the client): Prepare → citizen signs the 32-byte DTBS on phone/token → CompleteAsync (RFC 3161 TSA, OCSP/CRL, DSS). Native C# port of the Go reference, byte-identical output. Also: «My QR» RP client (GeregeSystems.EidMongolia.Qr) — the citizen's «My info», PIN2-signed PS256 JWS (x5c, qualified cert) verified offline + OCSP.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>eid;mongolia;pades;pdf;signature;etsi;qr;identity</PackageTags>
