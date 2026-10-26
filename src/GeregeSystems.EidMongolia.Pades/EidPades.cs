@@ -527,7 +527,7 @@ public static partial class EidPades
         return name != "" ? name : LastAttr(c.SubjectName, "2.5.4.3");
     }
 
-    private static string LastAttr(X500DistinguishedName dn, string oid)
+    internal static string LastAttr(X500DistinguishedName dn, string oid)
     {
         string v = "";
         foreach (var rdn in dn.EnumerateRelativeDistinguishedNames(reversed: false))
