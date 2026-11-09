@@ -36,9 +36,9 @@ public class RevocationTests
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse(Manifest.GetProperty("now").GetString()!, CultureInfo.InvariantCulture);
     private static readonly DateTimeOffset SigningTime = DateTimeOffset.Parse(Manifest.GetProperty("signingTime").GetString()!, CultureInfo.InvariantCulture);
 
-    private static X509Certificate2 Cert(string name) => X509Certificate2.CreateFromPem(File.ReadAllText(Path.Combine(Fixtures.Golden, "pki", name + ".pem")));
+    internal static X509Certificate2 Cert(string name) => X509Certificate2.CreateFromPem(File.ReadAllText(Path.Combine(Fixtures.Golden, "pki", name + ".pem")));
 
-    private static X509Certificate2 WithKey(string name)
+    internal static X509Certificate2 WithKey(string name)
     {
         using var rsa = RSA.Create();
         rsa.ImportFromPem(File.ReadAllText(Path.Combine(Fixtures.Golden, "pki", name + ".key.pem")));
@@ -48,14 +48,14 @@ public class RevocationTests
     private static readonly X509Certificate2 Citizen = Cert("citizen");
     private static readonly X509Certificate2 Ca04 = Cert("04");
 
-    private enum St
+    internal enum St
     {
         Good,
         Revoked,
     }
 
     /// <summary>RFC 6960 OCSPResponse (successful, basic), <paramref name="signer"/>-ийн түлхүүрээр, certs-гүй (олгогч өөрөө зурсан).</summary>
-    private static byte[] OcspResponse(X509Certificate2 signer, X509Certificate2 nameFrom, BigInteger serial, St st, DateTimeOffset thisUpdate,
+    internal static byte[] OcspResponse(X509Certificate2 signer, X509Certificate2 nameFrom, BigInteger serial, St st, DateTimeOffset thisUpdate,
         DateTimeOffset? nextUpdate)
     {
         var tbs = new AsnWriter(AsnEncodingRules.DER);
