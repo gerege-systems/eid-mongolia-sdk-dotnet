@@ -1,0 +1,19 @@
+{
+  "_comment": "TEST ONLY. CA POST /seal/{orgEtsi} хариуны хэлбэр (тест PKI: тамганы гэрчилгээг golden 04 олгосон). request.digest = SHA-256(\"eID e-Seal contract digest\").",
+  "request": {
+    "digest": "heyJcvCikCc4N7qDep3txJJUAfaDFui+GkAZCxUbPZo=",
+    "hashType": "SHA256"
+  },
+  "response": {
+    "orgEtsi": "NTRMN-1234567",
+    "signature": {
+      "value": "MEUCIQDZnpkS0OjzlwlmkAmyp57M9mvrmGEGpXrTVehyXW10vwIgTX0vXzHVP78XJXEvXrGYs0HiQPBexyrG9+1hW3DEcpY=",
+      "signatureAlgorithm": "ecdsa-with-SHA256"
+    },
+    "cert": {
+      "value": "MIICzDCCAbSgAwIBAgICXqEwDQYJKoZIhvcNAQELBQAwQDELMAkGA1UEBhMCTU4xMTAvBgNVBAMTKFRFU1QgT05MWSBHb2xkZW4gZUlEIE1vbmdvbGlhIElzc3VpbmcgQ0EwHhcNMjYwMjAxMDAwMDAwWhcNMjgwMTAxMDAwMDAwWjBnMQswCQYDVQQGEwJNTjEfMB0GA1UECgwWVEVTVCBPTkxZIFNlYWwgT3JnIExMQzEWMBQGA1UEYQwNTlRSTU4tMTIzNDU2NzEfMB0GA1UEAwwWVEVTVCBPTkxZIFNlYWwgT3JnIExMQzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABPJDLau1iEywV6UrH9ruodKyC7ak+xfAlbC7yr977XFTvdbTNewYfq0ANXKrfU6wOgEV4fdAB0G5fPwrNM17z1ajdDByMA4GA1UdDwEB/wQEAwIGQDAzBggrBgEFBQcBAQQnMCUwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnBraS50ZXN0LzA0MCsGA1UdHwQkMCIwIKAeoByGGmh0dHA6Ly9jcmwucGtpLnRlc3QvMDQuY3JsMA0GCSqGSIb3DQEBCwUAA4IBAQBqNfJ3PQMcLauYTY/4s/LXDniMUGNw+asGRo6IkwswJ87D3TjxkIq7QZ1M86XZm/6CJsNIr8mgHQjH/yfuBdSkNievPL2SDKpuYwjLtvL6NdZbSqaEQ7pmYbYFaMGFC9mse3e2KJoTy8qD5rbAR/w4EHL89ekXUFvXrYviOQIS7Je6cvev4SC/oJlVVci0wvu1gLfnRKci1gEe3gosk1MUK14G4i3aZnkGXLzfSGBzLYpNCuXNKFDyLB6HL3w7Zt28RhYsEqhPD62oSXcBhPpaWVQQn+NI32rlGcspEB6BNN5iK8mpMB10N2YT5vu4LLxIfH7Gq6eCDzIL2zGUV0rP",
+      "certificateLevel": "QUALIFIED"
+    },
+    "sealedAt": "2026-11-09T10:00:00Z"
+  }
+}

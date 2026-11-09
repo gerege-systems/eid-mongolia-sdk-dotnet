@@ -147,6 +147,46 @@ Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md
 олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол
 thisUpdate ≥ одоо − 24 ц) байна.
 
+## Байгууллагын тамга (e-Seal)
+
+`EidPades.SealAsync` — PDF-д байгууллагын тамганы гэрчилгээгээр PAdES-BASELINE-LT гарын үсэг суулгана. Иргэн, PIN, апп
+оролцохгүй: SDK DTBS-ийг бэлдээд (verify хуудас, харагдах дүрслэлгүй — тамгыг CA-ийн `/verify/{docId}`-д бүртгэдэггүй)
+таны delegate-ийг дуудна; delegate нь RP backend-ийн өөрийн `HttpClient`-ээр CA `POST /seal/{orgEtsi}` хийж
+`signature.value`-ийг буцаана. SDK энд HTTP client агуулахгүй.
+
+```csharp
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using GeregeSystems.EidMongolia.Pades;
+
+// SealCert: CA GET /seal/certificate/{orgEtsi} → "certificate" (base64 DER).
+Completed done = await EidPades.SealAsync(pdfBytes, new SealOptions
+{
+    SealCert = Convert.FromBase64String(sealCertB64),
+    Reason = "Байгууллагын тамга",            // SignerName = гэрчилгээний CN (байгууллагын нэр), Chain = шигтгэсэн eID гинж
+}, async (dtbs, ct) =>
+{
+    using var req = new HttpRequestMessage(HttpMethod.Post, $"https://rp.eidmongolia.mn/seal/{orgEtsi}")
+    {
+        Content = JsonContent.Create(new { digest = Convert.ToBase64String(dtbs), hashType = "SHA256" }),
+    };
+    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rpSecret);
+    using var resp = await http.SendAsync(req, ct);
+    resp.EnsureSuccessStatusCode();                    // 403 = SEAL:<orgEtsi> эрхгүй; 429 = түр хязгаарлагдсан
+    using var body = JsonDocument.Parse(await resp.Content.ReadAsStreamAsync(ct));
+    return Convert.FromBase64String(body.RootElement.GetProperty("signature").GetProperty("value").GetString()!);
+}, cancellationToken: ct);
+File.WriteAllBytes("sealed.pdf", done.Pdf);
+```
+
+- RP-д `SEAL:<orgEtsi>` эрх хэрэгтэй (үгүй бол 403). 429 — хурдны хязгаар: хэсэг хүлээгээд дахин оролдоно (delegate-ийн
+  exception SDK-ээр өөрчлөгдөхгүй дамжина).
+- RFC 3161 timestamp заавал — TSA хүрэхгүй бол `TSA_UNAVAILABLE` (timestamp-гүй тамга гаргахгүй).
+- `SealCert` нь тамганы профайл байх ёстой (KeyUsage = зөвхөн nonRepudiation, digitalSignature үгүй, EKU үгүй) — үгүй бол
+  `SIGNER_INVALID`. Гарын үсэг DTBS / `SealCert`-тэй таарахгүй бол `SIGNATURE_INVALID`.
+- Тамганы гэрчилгээг CA / админ консолоор олгоно — энэ SDK-д олгох функц байхгүй.
+
 ## «Миний QR» — иргэний «Миний мэдээлэл» (`GeregeSystems.EidMongolia.Qr`, 0.13.0)
 
 PAdES-ээс тусдаа, ижил багцад. Иргэн eID апп дээрээ «Миний QR»-ийг харуулна (`EIDMN-QR1:<token>`, 120 с, нэг
@@ -227,6 +267,13 @@ MIT — [LICENSE](LICENSE). Гуравдагч: Noto Sans (OFL 1.1), digitorus/p
 ---
 
 ## English
+
+**Organization e-Seal:** `EidPades.SealAsync(pdf, new SealOptions { SealCert = … }, sealDigest)` prepares an invisible
+signature (no verify page) with the organization's seal certificate (keyUsage nonRepudiation only, no EKU — else
+`SIGNER_INVALID`), calls your delegate with the 32-byte DTBS (your own `HttpClient` → CA `POST /seal/{orgEtsi}`
+`{digest, hashType: "SHA256"}`, return the decoded `signature.value`), then completes to PAdES-BASELINE-LT (timestamp
+mandatory). Needs the RP permission `SEAL:<orgEtsi>`; 429 = retry later; seal certificates are issued by the CA/admin,
+not by this SDK.
 
 **«My QR» (0.13.0, namespace `GeregeSystems.EidMongolia.Qr`):** `EidQr.Parse` (`EIDMN-QR1:<token>`) →
 `EidQrClient.StartAsync` (`POST /authentication/qr` with an auto 22-char nonce) → `ResultAsync` / `CheckAsync` (long-poll)
