@@ -224,7 +224,7 @@ public class SealTests
         Assert.Equal("SHA256", req.GetProperty("hashType").GetString());
         var digest = Convert.FromBase64String(req.GetProperty("digest").GetString()!);
         var signature = Convert.FromBase64String(resp.GetProperty("signature").GetProperty("value").GetString()!);
-        using var cert = new X509Certificate2(Convert.FromBase64String(resp.GetProperty("cert").GetProperty("value").GetString()!));
+        using var cert = X509CertificateLoader.LoadCertificate(Convert.FromBase64String(resp.GetProperty("cert").GetProperty("value").GetString()!));
 
         Assert.True(EidPades.IsSealCert(cert));
         Assert.Equal("NTRMN-1234567", EidPades.LastAttr(cert.SubjectName, "2.5.4.97"));
