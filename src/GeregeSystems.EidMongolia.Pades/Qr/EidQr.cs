@@ -94,8 +94,8 @@ public static class EidQr
         X509Certificate2 leaf, inter;
         try
         {
-            leaf = new X509Certificate2(leafDer);
-            inter = new X509Certificate2(interDer);
+            leaf = X509Util.Load(leafDer);
+            inter = X509Util.Load(interDer);
         }
         catch (CryptographicException)
         {
@@ -240,7 +240,7 @@ public static class EidQr
                 throw Bad("гэрчилгээний хугацаа хүчингүй (" + Revocation.CertRef(c) + ")");
             }
         }
-        var issuer = new X509Certificate2(chain.ChainElements[1].Certificate.RawData);
+        var issuer = X509Util.Load(chain.ChainElements[1].Certificate.RawData);
 
         X509BasicConstraintsExtension? bc = null;
         X509KeyUsageExtension? ku = null;

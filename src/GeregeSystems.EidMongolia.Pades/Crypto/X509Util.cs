@@ -17,11 +17,20 @@ internal static class X509Util
     private const string OidAia = "1.3.6.1.5.5.7.1.1";
     private const string OidAdOcsp = "1.3.6.1.5.5.7.48.1";
 
+    internal static X509Certificate2 Load(byte[] der)
+    {
+#if NET9_0_OR_GREATER
+        return X509CertificateLoader.LoadCertificate(der);
+#else
+        return new X509Certificate2(der);
+#endif
+    }
+
     public static X509Certificate2 Parse(byte[] der)
     {
         try
         {
-            return new X509Certificate2(der);
+            return Load(der);
         }
         catch (CryptographicException e)
         {

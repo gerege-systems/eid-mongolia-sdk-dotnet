@@ -136,13 +136,13 @@ public class QrTests
             }
             if (issuer is null)
             {
-                return new X509Certificate2(req.CreateSelfSigned(nb, na).RawData);
+                return X509CertificateLoader.LoadCertificate(req.CreateSelfSigned(nb, na).RawData);
             }
             var issuerSki = issuer.Extensions.OfType<X509SubjectKeyIdentifierExtension>().First().SubjectKeyIdentifierBytes.Span;
             req.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromSubjectKeyIdentifier(issuerSki));
             var gen = X509SignatureGenerator.CreateForRSA(issuerKey!, RSASignaturePadding.Pkcs1);
             using var c = req.Create(issuer.SubjectName, gen, nb, na, new byte[] { 0x01, serial });
-            return new X509Certificate2(c.RawData);
+            return X509CertificateLoader.LoadCertificate(c.RawData);
         }
     }
 
