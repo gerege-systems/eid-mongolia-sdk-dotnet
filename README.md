@@ -11,7 +11,7 @@ xref, CMS, TSA/OCSP/CRL хүсэлт, DSS) **байт-ижил** гаргадг�
 
 Бүрэн баримт: <https://developer.eidmongolia.mn/#overview>.
 
-- Багц: NuGet `GeregeSystems.EidMongolia.Pades`, `net8.0`. Хамаарал: зөвхөн `System.Security.Cryptography.Pkcs` (Microsoft).
+- Багц: NuGet `GeregeSystems.EidMongolia.Pades`, `net8.0` ба `net10.0` (multi-target). `net8.0`-ийн runtime 2026-11-10-нд дэмжлэгээс гарсан; одоогийн relying party-ууд restore хийж чадахын тулд түр хадгалсан бөгөөд дараагийн хувилбарт хасна. Хамаарал: зөвхөн `System.Security.Cryptography.Pkcs` (Microsoft).
 - Thread-safe, глобал төлөвгүй. Сүлжээ зөвхөн `CompleteAsync`-д (TSA, OCSP/CRL).
 - Бүрэн шалгагч (validator) энд **байхгүй** — шалгалт: файлын SHA-256-аар CA-ийн бүртгэлээс, бүрэн криптограф шалгалт Go
   backend SDK-д.
@@ -283,7 +283,7 @@ aud/sid/nonce/time, data limits) → `QrResult` with the citizen's «My info» f
 signer, `Sha256` (= CA audit `qrsha`). RP permission: `QR_PRESENT` only. Same rules as the Go and TS SDKs (CA vectors
 `testdata/myqr_vectors.json`).
 
-Client-side PAdES for eID Mongolia in pure C# (.NET 8). The PDF never leaves the client: `Prepare` writes the signature
+Client-side PAdES for eID Mongolia in pure C# (.NET 10; also targets .NET 8 for compatibility — .NET 8 is out of support since 2026-11-10 and will be dropped in a later release). The PDF never leaves the client: `Prepare` writes the signature
 revision (optionally a bilingual verification page with a QR code) and returns the 32-byte DTBS; the citizen signs it on
 their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `CompleteAsync` verifies the signature, gets an
 RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
