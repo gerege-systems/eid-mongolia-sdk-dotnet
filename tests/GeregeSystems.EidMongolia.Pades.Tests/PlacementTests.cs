@@ -285,8 +285,8 @@ public class PlacementTests
                 for (int i = 0; i < size; i++) src[i] = (byte)(i % 97 < 50 ? i * 7 % 251 : rnd.Next(256));
                 var ms = new MemoryStream();
                 using (var z = new ZLibStream(ms, level, leaveOpen: true)) z.Write(src);
-                var dbg = ZlibStrict.Decode(ms.ToArray(), 1 << 22);
-                Assert.True(dbg != null, $"DIAG level={level} size={size} len={ms.Length} head={Convert.ToHexString(ms.ToArray().AsSpan(0, (int)Math.Min(ms.Length, 24)))}");
+                // .NET 10's ZLibStream writes nothing for an empty input; use the canonical empty zlib stream instead.
+                if (size == 0 && ms.Length == 0) ms.Write(new byte[] { 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 });
                 Assert.Equal(src, ZlibStrict.Decode(ms.ToArray(), 1 << 22));
                 if (size > 0) Assert.Null(ZlibStrict.Decode(ms.ToArray(), size - 1)); // decoded-size budget
             }
