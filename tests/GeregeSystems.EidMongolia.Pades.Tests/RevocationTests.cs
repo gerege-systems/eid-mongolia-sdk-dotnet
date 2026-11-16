@@ -55,9 +55,12 @@ public class RevocationTests
         Revoked,
     }
 
-    /// <summary>RFC 6960 OCSPResponse (successful, basic), <paramref name="signer"/>-ийн түлхүүрээр, certs-гүй (олгогч өөрөө зурсан).</summary>
+    /// <summary>
+    /// RFC 6960 OCSPResponse (successful, basic), <paramref name="signer"/>-ийн түлхүүрээр, certs-гүй (олгогч өөрөө зурсан).
+    /// CertID: issuerNameHash = <paramref name="nameFrom"/>, issuerKeyHash = <paramref name="keyFrom"/> (анхдагч 04).
+    /// </summary>
     internal static byte[] OcspResponse(X509Certificate2 signer, X509Certificate2 nameFrom, BigInteger serial, St st, DateTimeOffset thisUpdate,
-        DateTimeOffset? nextUpdate)
+        DateTimeOffset? nextUpdate, X509Certificate2? keyFrom = null)
     {
         var tbs = new AsnWriter(AsnEncodingRules.DER);
         using (tbs.PushSequence())
@@ -76,7 +79,7 @@ public class RevocationTests
                         tbs.WriteNull();
                     }
                     tbs.WriteOctetString(SHA1.HashData(nameFrom.SubjectName.RawData));
-                    tbs.WriteOctetString(SHA1.HashData(Ca04.PublicKey.EncodedKeyValue.RawData));
+                    tbs.WriteOctetString(SHA1.HashData((keyFrom ?? Ca04).PublicKey.EncodedKeyValue.RawData));
                     tbs.WriteInteger(serial);
                 }
                 if (st == St.Good)
@@ -127,35 +130,53 @@ public class RevocationTests
     private static byte[] Ocsp(St st, DateTimeOffset thisUpdate, DateTimeOffset? nextUpdate = null, string nameFrom = "04", BigInteger? serial = null) =>
         OcspResponse(WithKey("04"), Cert(nameFrom), serial ?? Cms.Serial(Citizen), st, thisUpdate, nextUpdate);
 
-    private static byte[] Crl(string issuer, DateTimeOffset thisUpdate, DateTimeOffset nextUpdate, bool listCitizen)
+    private static byte[] Crl(string issuer, DateTimeOffset thisUpdate, DateTimeOffset nextUpdate, bool listCitizen) =>
+        Crl(issuer, thisUpdate, nextUpdate, listCitizen ? Citizen : null);
+
+    private static byte[] Crl(string issuer, DateTimeOffset thisUpdate, DateTimeOffset nextUpdate, X509Certificate2? listed)
     {
         var b = new CertificateRevocationListBuilder();
-        if (listCitizen) b.AddEntry(Citizen.SerialNumberBytes.Span, thisUpdate.AddDays(-1));
+        if (listed is not null) b.AddEntry(listed.SerialNumberBytes.Span, thisUpdate.AddDays(-1));
         return b.Build(WithKey(issuer), BigInteger.One, nextUpdate, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1, thisUpdate);
     }
 
     /// <summary>
-    /// Иргэний OCSP (POST ocsp/04, иргэний хүсэлт) ба 04.crl-ийг солино (null → 404); бусад нь golden replay.
-    /// <c>delay</c> ("METHOD URL" → хүлээлт) — хариугүй/удаан responder-ийг дуурайна (ct-г хүндэтгэнэ).
+    /// Иргэний OCSP (POST ocsp/04, иргэний хүсэлт) ба 04.crl-ийг солино (null → 404); <c>over</c> ("METHOD URL" → хариу,
+    /// null → 404) бусдыг солино; бусад нь golden replay. <c>delay</c> ("METHOD URL" → хүлээлт) — хариугүй/удаан responder-ийг
+    /// дуурайна (ct-г хүндэтгэнэ). <see cref="Seen"/> — ирсэн хүсэлт бүр ("METHOD URL"), хүлээлтээс өмнө бүртгэгдэнэ.
     /// </summary>
     private sealed class Handler : HttpMessageHandler
     {
         private readonly byte[]? _ocsp;
         private readonly byte[]? _crl;
         private readonly Func<string, CancellationToken, Task>? _delay;
+        private readonly IReadOnlyDictionary<string, byte[]?>? _over;
+        private readonly List<string> _seen = new();
 
-        public Handler(byte[]? ocsp, byte[]? crl, Func<string, CancellationToken, Task>? delay = null)
+        public Handler(byte[]? ocsp, byte[]? crl, Func<string, CancellationToken, Task>? delay = null, IReadOnlyDictionary<string, byte[]?>? over = null)
         {
             _ocsp = ocsp;
             _crl = crl;
             _delay = delay;
+            _over = over;
+        }
+
+        public string[] Seen
+        {
+            get
+            {
+                lock (_seen) return _seen.ToArray();
+            }
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? Array.Empty<byte>() : await request.Content.ReadAsByteArrayAsync(ct);
             var url = request.RequestUri!.ToString();
-            if (_delay is not null) await _delay(request.Method.Method + " " + url, ct);
+            var k = request.Method.Method + " " + url;
+            lock (_seen) _seen.Add(k);
+            if (_delay is not null) await _delay(k, ct);
+            if (_over is not null && _over.TryGetValue(k, out var o)) return Reply(o);
             if (url == "http://ocsp.pki.test/04" && body.AsSpan().SequenceEqual(Crypto.Ocsp.CreateRequest(Citizen, Ca04))) return Reply(_ocsp);
             if (url == "http://crl.pki.test/04.crl") return Reply(_crl);
             var key = request.Method.Method + " " + url + " " + Convert.ToHexString(SHA256.HashData(body)).ToLowerInvariant()[..16];
@@ -168,15 +189,15 @@ public class RevocationTests
 
     /// <summary>
     /// <paramref name="timeout"/> — HTTP-ийн энгийн timeout-ыг (Fetcher-ийн 10 с-ийг дуурайж) HttpClient.Timeout-оор богиносгоно;
-    /// <paramref name="chains"/> — өгөөгүй бол иргэний гинж.
+    /// <paramref name="chains"/> — өгөөгүй бол иргэний гинж; <paramref name="handler"/> — хүсэлтүүдийг шалгах бол өөрийн Handler.
     /// </summary>
-    private static Task<DssData> Collect(byte[]? ocsp, byte[]? crl, Func<string, CancellationToken, Task>? delay = null, TimeSpan? grace = null,
-        CancellationToken ct = default, TimeSpan? timeout = null, IReadOnlyList<X509Certificate2>[]? chains = null)
+    private static Task<DssData> Collect(byte[]? ocsp, byte[]? crl, Func<string, CancellationToken, Task>? delay = null,
+        CancellationToken ct = default, TimeSpan? timeout = null, IReadOnlyList<X509Certificate2>[]? chains = null, Handler? handler = null)
     {
-        var http = new HttpClient(new Handler(ocsp, crl, delay));
+        var http = new HttpClient(handler ?? new Handler(ocsp, crl, delay));
         if (timeout is { } t) http.Timeout = t;
         var f = new Fetcher(http);
-        return Ltv.CollectAsync(f, Now, SigningTime, new[] { Cert("root") }, grace ?? Ltv.OcspGrace, ct,
+        return Ltv.CollectAsync(f, Now, SigningTime, new[] { Cert("root") }, ct,
             chains ?? new IReadOnlyList<X509Certificate2>[] { new[] { Citizen, Ca04, Cert("03"), Cert("02") } });
     }
 
@@ -190,6 +211,7 @@ public class RevocationTests
     private const string CitizenOcsp = "POST http://ocsp.pki.test/04"; // иргэний (навч) OCSP
     private const string Ca04Ocsp = "POST http://ocsp.pki.test/03"; // 04-ийн (завсрын CA) OCSP
     private const string CitizenCrl = "GET http://crl.pki.test/04.crl";
+    private const string Ca04Crl = "GET http://crl.pki.test/03.crl"; // 04-ийн (завсрын CA) CRL
 
     private static byte[] Replayed(string key) =>
         Fixtures.Read(Manifest.GetProperty("http").GetProperty(key + " e3b0c44298fc1c14").GetString()!.Split('/'));
@@ -250,108 +272,171 @@ public class RevocationTests
         Assert.True(e is LtvException, name + ": " + e.GetType().Name);
     }
 
-    // ── Хариугүй OCSP responder: OCSP ба CRL зэрэг, хүчинтэй CRL-тэй бол OCSP-г цонхоор (Ltv.OcspGrace) хязгаарлана ──
+    // ── Эх сурвалжийн дараалал гэрчилгээний үүргээр: навч — OCSP эхэлж, CA — CRL эхэлж (хүчинтэй CRL → OCSP хүсэлтгүй) ──
 
-    /// <summary>Эрүүл гинж: OCSP ба CRL хоёулаа, гинжийн дарааллаар (дараалсан хувилбартай ижил; golden-ууд байт-түвшинд тулгана).</summary>
+    private static byte[] GoodOcsp => Ocsp(St.Good, Fresh, Now.AddDays(1));
+
+    private static byte[] CleanCrl => Crl("04", Now.AddHours(-1), Now.AddDays(1), false);
+
+    /// <summary>
+    /// Эрүүл гинж: иргэн OCSP + CRL, CA (04, 03, 02) зөвхөн CRL, гинжийн дарааллаар; CA-ийн OCSP responder (ocsp/03) руу хүсэлт
+    /// огт очихгүй — OCSP POST зөвхөн иргэнийх.
+    /// </summary>
     [Fact]
-    public async Task HealthyChainKeepsOcspAndCrlInChainOrder()
+    public async Task HealthyChainLeafOcspAndCrlCaCrlOnlyInChainOrder()
     {
-        var ocsp = Ocsp(St.Good, Fresh, Now.AddDays(1));
-        var crl = Crl("04", Now.AddHours(-1), Now.AddDays(1), false);
-        var d = await Collect(ocsp, crl);
-        Assert.Equal(2, d.Ocsps.Count);
-        Assert.Equal(ocsp, d.Ocsps[0]);
-        Assert.True(Revocation.OcspCertIdMatches(d.Ocsps[1], Ca04, Cert("03")));
+        var ocsp = GoodOcsp;
+        var crl = CleanCrl;
+        var h = new Handler(ocsp, crl);
+        var d = await Collect(null, null, handler: h);
+        Assert.Equal(new[] { ocsp }, d.Ocsps);
         Assert.Equal(new[] { crl, Replayed("GET http://crl.pki.test/03.crl"), Replayed("GET http://crl.pki.test/02.crl"), Replayed("GET http://crl.pki.test/root.crl") },
             d.Crls);
         var idx = new[] { Citizen, Ca04, Cert("03"), Cert("02") }.Select(c => d.Certs.FindIndex(b => b.AsSpan().SequenceEqual(c.RawData))).ToArray();
         Assert.True(idx[0] == 0 && idx[0] < idx[1] && idx[1] < idx[2] && idx[2] < idx[3], string.Join(",", idx));
+        Assert.Equal(new[] { CitizenOcsp }, h.Seen.Where(k => k.StartsWith("POST ", StringComparison.Ordinal)).ToArray());
     }
 
-    /// <summary>04-ийн (CA) OCSP хариулдаггүй, CRL хүчинтэй → цонхын дотор CRL-ээр дуусна (өмнө нь 10 с timeout).</summary>
+    /// <summary>04-ийн (CA) OCSP responder хариулдаггүй, CRL хүчинтэй → OCSP-г огт асуухгүй, шууд дуусна (timeout хүлээхгүй).</summary>
     [Fact]
-    public async Task DeadCaOcspFallsBackToCrlWithinGrace()
+    public async Task CaWithValidCrlSendsNoOcspEvenIfResponderHangs()
     {
+        var h = new Handler(GoodOcsp, CleanCrl, Hang(Ca04Ocsp));
         var sw = Stopwatch.StartNew();
-        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(Ca04Ocsp),
-            TimeSpan.FromMilliseconds(300));
+        var d = await Collect(null, null, timeout: TimeSpan.FromSeconds(30), handler: h);
         sw.Stop();
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
+        Assert.DoesNotContain(Ca04Ocsp, h.Seen);
         Assert.Single(d.Ocsps); // иргэнийх л
-        Assert.Contains(d.Crls, b => b.AsSpan().SequenceEqual(Replayed("GET http://crl.pki.test/03.crl")));
+        Assert.Contains(d.Crls, b => b.AsSpan().SequenceEqual(Replayed(Ca04Crl)));
     }
 
     /// <summary>
-    /// Хоёр CA гэрчилгээний OCSP хариугүй → нийт ≈ нэг цонх (гэрчилгээ тус бүрд биш); цонхыг бүтнээр нь өгнө. Тестийн PKI-д
-    /// OCSP-тэй CA ганц (04) тул гинжийг OCSP-гүй 02-оор эхлүүлж, иргэн ба 04-ийг хоёуланг нь CA байрлалд (эхнийхээс хойш) тавина.
+    /// Дүрэм байрлалаар (хостын нэрээр биш): гинжийн эхнийхээс хойшх гэрчилгээ бүр CA — иргэн ба 04-ийг CA байрлалд (02-оор
+    /// эхэлсэн гинж) тавихад хоёулангийнх нь хариугүй OCSP-г асуухгүй, CRL-ээр шууд дуусна.
     /// </summary>
     [Fact]
-    public async Task DeadCaOcspsCostOneGraceWindowNotOnePerCertificate()
+    public async Task EveryCertificateAfterTheFirstIsCrlFirst()
     {
-        var grace = TimeSpan.FromMilliseconds(1500);
+        var h = new Handler(GoodOcsp, CleanCrl, Hang(CitizenOcsp, Ca04Ocsp));
         var sw = Stopwatch.StartNew();
-        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(CitizenOcsp, Ca04Ocsp), grace,
+        var d = await Collect(null, null, timeout: TimeSpan.FromSeconds(30), handler: h,
             chains: new IReadOnlyList<X509Certificate2>[] { new[] { Cert("02"), Citizen, Ca04, Cert("03") } });
         sw.Stop();
-        Assert.True(sw.Elapsed >= TimeSpan.FromSeconds(1), "OCSP must get the grace window: " + sw.Elapsed);
-        Assert.True(sw.Elapsed < 2 * grace - TimeSpan.FromMilliseconds(100), "dead responders must not add up: " + sw.Elapsed);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
+        Assert.DoesNotContain(CitizenOcsp, h.Seen);
+        Assert.DoesNotContain(Ca04Ocsp, h.Seen);
         Assert.Empty(d.Ocsps);
         Assert.Equal(4, d.Crls.Count);
     }
 
+    public static IEnumerable<object[]> CaCrlUnusable() => new[]
+    {
+        new object[] { "no CRL (404)", null! },
+        new object[] { "expired (nextUpdate −47h)", Crl("03", Now.AddHours(-48), Now.AddHours(-47), false) },
+        new object[] { "wrong issuer (02)", Crl("02", Now.AddHours(-1), Now.AddDays(1), false) },
+        new object[] { "garbage", new byte[] { 0x30, 0x03, 0x02, 0x01, 0x00 } },
+    };
+
+    /// <summary>04-ийн (CA) хүчинтэй CRL авч чадаагүй → OCSP нөөц (golden replay-ийн ocsp/03 хариу), гинжийн дарааллаар.</summary>
+    [Theory]
+    [MemberData(nameof(CaCrlUnusable))]
+    public async Task CaWithoutValidCrlFallsBackToOcsp(string name, byte[]? caCrl)
+    {
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = caCrl });
+        var d = await Collect(null, null, handler: h);
+        Assert.Contains(Ca04Ocsp, h.Seen);
+        Assert.True(d.Ocsps.Count == 2 && Revocation.OcspCertIdMatches(d.Ocsps[1], Ca04, Cert("03")), name);
+        Assert.Equal(3, d.Crls.Count); // иргэн, 03, 02-ийнх — 04-ийн хүчингүй CRL суухгүй
+    }
+
+    /// <summary>CA-ийн нөөц OCSP нь энгийн timeout-тай — удаан хариуг хүлээж суулгана.</summary>
+    [Fact]
+    public async Task SlowCaOcspFallbackIsAwaited()
+    {
+        var h = new Handler(GoodOcsp, CleanCrl, Slow(Ca04Ocsp, TimeSpan.FromMilliseconds(800)), new Dictionary<string, byte[]?> { [Ca04Crl] = null });
+        var sw = Stopwatch.StartNew();
+        var d = await Collect(null, null, handler: h);
+        sw.Stop();
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(700), sw.Elapsed.ToString());
+        Assert.True(d.Ocsps.Count == 2 && Revocation.OcspCertIdMatches(d.Ocsps[1], Ca04, Cert("03")));
+    }
+
+    /// <summary>CA: хүчинтэй CRL ч, хүчинтэй OCSP ч алга → өмнөх шигээ LTV incomplete (fail-closed).</summary>
+    [Fact]
+    public async Task CaWithoutCrlOrOcspFails()
+    {
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = null, [Ca04Ocsp] = null });
+        var e = await Assert.ThrowsAsync<LtvException>(() => Collect(null, null, handler: h));
+        Assert.Contains("no valid OCSP/CRL for serial", e.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>CA-г олгогчийн CRL-д цуцалсан → хатуу алдаа, OCSP-г асуухгүй.</summary>
+    [Fact]
+    public async Task RevokedCaViaCrlIsHardFailure()
+    {
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = Crl("03", Now.AddHours(-1), Now.AddDays(1), Ca04) });
+        await Assert.ThrowsAsync<CertificateRevokedException>(() => Collect(null, null, handler: h));
+        Assert.DoesNotContain(Ca04Ocsp, h.Seen);
+    }
+
+    /// <summary>CA-ийн нөөц OCSP (03-ийн түлхүүрээр зурсан, 04-ийн CertID) «revoked» → хатуу алдаа.</summary>
+    [Fact]
+    public Task RevokedCaViaOcspFallbackIsHardFailure()
+    {
+        var revoked = OcspResponse(WithKey("03"), Cert("03"), Cms.Serial(Ca04), St.Revoked, Fresh, Now.AddDays(1), keyFrom: Cert("03"));
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = null, [Ca04Ocsp] = revoked });
+        return Assert.ThrowsAsync<CertificateRevokedException>(() => Collect(null, null, handler: h));
+    }
+
     /// <summary>
-    /// Навчны (иргэний) OCSP цонхоос удаан, CRL хүчинтэй → цонхоор таслахгүй, хүлээгээд DSS-д суулгана (саяхан цуцлагдсан навч
-    /// дахин гаргаагүй CRL-ээр давахгүй).
+    /// Навчны (иргэний) OCSP удаан, CRL хүчинтэй → таслахгүй, хүлээгээд DSS-д суулгана (саяхан цуцлагдсан навч дахин гаргаагүй
+    /// CRL-ээр давахгүй).
     /// </summary>
     [Fact]
     public async Task SlowLeafOcspWithValidCrlIsStillAwaitedAndEmbedded()
     {
-        var ocsp = Ocsp(St.Good, Fresh, Now.AddDays(1));
+        var ocsp = GoodOcsp;
         var sw = Stopwatch.StartNew();
-        var d = await Collect(ocsp, Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)),
-            TimeSpan.FromMilliseconds(200));
+        var d = await Collect(ocsp, CleanCrl, Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)));
         sw.Stop();
         Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(700), sw.Elapsed.ToString());
-        Assert.Equal(2, d.Ocsps.Count);
-        Assert.Equal(ocsp, d.Ocsps[0]);
+        Assert.Equal(new[] { ocsp }, d.Ocsps);
     }
 
-    /// <summary>TSA гинжийн навчны OCSP мөн цонхоор таслагдахгүй (гинж бүрийн эхний гэрчилгээ).</summary>
+    /// <summary>TSA гинжийн навч мөн OCSP эхэлж (гинж бүрийн эхний гэрчилгээ); CA-ууд CRL-ээр.</summary>
     [Fact]
     public async Task SlowTsaLeafOcspWithValidCrlIsStillAwaitedAndEmbedded()
     {
         var tsa = Cert("tsa");
-        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false),
-            Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(200),
+        var d = await Collect(GoodOcsp, CleanCrl, Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)),
             chains: new IReadOnlyList<X509Certificate2>[] { new[] { Citizen, Ca04, Cert("03"), Cert("02") }, new[] { tsa, Ca04, Cert("03"), Cert("02") } });
-        Assert.Equal(3, d.Ocsps.Count);
+        Assert.Equal(2, d.Ocsps.Count);
         Assert.Contains(d.Ocsps, b => Revocation.OcspCertIdMatches(b, tsa, Ca04));
     }
 
     /// <summary>
-    /// Навчны OCSP хариугүй, CRL хүчинтэй → цонхоор биш, энгийн timeout бүтэн дууссаны дараа CRL-ээр (v0.15.0-аас өмнөх шиг).
-    /// Timeout-ыг HttpClient.Timeout-оор 1 с болгож тестийг хурдан байлгана.
+    /// Навчны OCSP хариугүй, CRL хүчинтэй → энгийн timeout бүтэн дууссаны дараа CRL-ээр. Timeout-ыг HttpClient.Timeout-оор 1 с
+    /// болгож тестийг хурдан байлгана.
     /// </summary>
     [Fact]
     public async Task HangingLeafOcspWithValidCrlFallsBackAfterFullTimeout()
     {
-        var crl = Crl("04", Now.AddHours(-1), Now.AddDays(1), false);
+        var crl = CleanCrl;
         var sw = Stopwatch.StartNew();
-        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), crl, Hang(CitizenOcsp), TimeSpan.FromMilliseconds(100),
-            timeout: TimeSpan.FromSeconds(1));
+        var d = await Collect(GoodOcsp, crl, Hang(CitizenOcsp), timeout: TimeSpan.FromSeconds(1));
         sw.Stop();
-        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(900), "leaf OCSP must get the full timeout, not the grace: " + sw.Elapsed);
-        Assert.Single(d.Ocsps); // 04-ийнх л
-        Assert.True(Revocation.OcspCertIdMatches(d.Ocsps[0], Ca04, Cert("03")));
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(900), "leaf OCSP must get the full timeout: " + sw.Elapsed);
+        Assert.Empty(d.Ocsps);
         Assert.Equal(crl, d.Crls[0]);
     }
 
-    /// <summary>Хүчинтэй CRL-гүй бол удаан OCSP-г цонхоор таслахгүй (fail-closed, өмнөхтэй ижил).</summary>
+    /// <summary>Навч: хүчинтэй CRL-гүй бол удаан OCSP-г хүлээнэ (fail-closed, өмнөхтэй ижил).</summary>
     [Fact]
     public async Task SlowOcspIsAwaitedWhenThereIsNoValidCrl()
     {
-        var ocsp = Ocsp(St.Good, Fresh, Now.AddDays(1));
-        var d = await Collect(ocsp, null, Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(200));
+        var ocsp = GoodOcsp;
+        var d = await Collect(ocsp, null, Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)));
         Assert.Equal(ocsp, d.Ocsps[0]);
     }
 
@@ -367,27 +452,39 @@ public class RevocationTests
     public async Task InvalidOcspFallsBackToCrlElseFails(string name, byte[] ocsp)
     {
         var d = await Collect(ocsp, Crl("04", Now.AddHours(-1), Now.AddDays(1), false));
-        Assert.True(d.Ocsps.Count == 1 && !d.Ocsps[0].AsSpan().SequenceEqual(ocsp), name);
+        Assert.True(d.Ocsps.Count == 0 && d.Crls.Count == 4, name);
         var e = await Assert.ThrowsAsync<LtvException>(() => Collect(ocsp, null));
         Assert.Contains("no valid OCSP/CRL for serial", e.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>Цонхын дотор ирсэн «revoked» OCSP нь хүчинтэй CRL байсан ч хатуу алдаа хэвээр.</summary>
+    /// <summary>Удаан ирсэн навчны «revoked» OCSP нь хүчинтэй CRL байсан ч хатуу алдаа хэвээр.</summary>
     [Fact]
-    public Task SlowRevokedOcspWithinGraceIsStillHardFailure() =>
+    public Task SlowRevokedLeafOcspIsStillHardFailure() =>
         Assert.ThrowsAsync<CertificateRevokedException>(() =>
             Collect(Ocsp(St.Revoked, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false),
-                Slow(CitizenOcsp, TimeSpan.FromMilliseconds(300)), TimeSpan.FromSeconds(3)));
+                Slow(CitizenOcsp, TimeSpan.FromMilliseconds(300))));
 
-    /// <summary>Дуудагчийн цуцлалт OCSP ба CRL хоёулаа хүлээж байхад шууд хүндэтгэгдэнэ.</summary>
+    /// <summary>Дуудагчийн цуцлалт навчны OCSP ба CRL хоёулаа хүлээж байхад шууд хүндэтгэгдэнэ.</summary>
     [Fact]
     public async Task CallerCancellationIsHonoured()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         var sw = Stopwatch.StartNew();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), null, Hang(CitizenOcsp, CitizenCrl), TimeSpan.FromSeconds(3), cts.Token));
+            Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), null, Hang(CitizenOcsp, CitizenCrl), cts.Token, TimeSpan.FromSeconds(30)));
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
+    }
+
+    /// <summary>Дуудагчийн цуцлалт CA-ийн нөөц OCSP (CRL-гүй, хариугүй responder) хүлээж байхад шууд хүндэтгэгдэнэ.</summary>
+    [Fact]
+    public async Task CallerCancellationDuringCaOcspFallbackIsHonoured()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var h = new Handler(GoodOcsp, CleanCrl, Hang(Ca04Ocsp), new Dictionary<string, byte[]?> { [Ca04Crl] = null });
+        var sw = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Collect(null, null, ct: cts.Token, timeout: TimeSpan.FromSeconds(30), handler: h));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
+        Assert.Contains(Ca04Ocsp, h.Seen);
     }
 
     /// <summary>Алдаа/цуцлалтаар гарахад үлдсэн OCSP task-ууд цуцлагдаж ажиглагдана — UnobservedTaskException үгүй.</summary>
@@ -404,11 +501,11 @@ public class RevocationTests
         {
             var sw = Stopwatch.StartNew();
             await Assert.ThrowsAsync<CertificateRevokedException>(() =>
-                Collect(Ocsp(St.Revoked, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(Ca04Ocsp), TimeSpan.FromSeconds(3)));
+                Collect(Ocsp(St.Revoked, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(Ca04Ocsp)));
             Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), null, Hang(CitizenOcsp, Ca04Ocsp, CitizenCrl), TimeSpan.FromSeconds(3), cts.Token));
+                Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), null, Hang(CitizenOcsp, Ca04Ocsp, CitizenCrl), cts.Token, TimeSpan.FromSeconds(30)));
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();

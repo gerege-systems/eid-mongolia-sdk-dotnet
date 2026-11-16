@@ -145,12 +145,19 @@ var prepared = EidPades.Prepare(pdf, opts with
 Prepare-ийн шалгуурууд нь Go reference-ийн `pades/PRECHECKS.md`-ийн дарааллаар (#2a/#2b бүтэц, #4 `/Encrypt` лавлагаа
 эсвэл шууд толь). `CompleteAsync`-ийн OCSP нь гэрчилгээний CertID (олгогчийн нэр/түлхүүрийн hash + serial)-тай, CRL нь
 олгогчийнх (нэр, AKI = SKI, гарын үсэг) байх ба аль аль нь шинэлэг (thisUpdate ≤ одоо + 5 мин; nextUpdate-гүй бол
-thisUpdate ≥ одоо − 24 ц) байна. Гэрчилгээ бүрийн OCSP ба CRL-ийг зэрэг татна: олгогчийн хүчинтэй CRL авсан **CA**
-гэрчилгээний OCSP-г цуглуулалт эхэлснээс хойш **3 с**-ээс удаан хүлээхгүй (холболт хүлээж аваад хариулдаггүй responder,
-жишээ нь `ocsp.esign.gov.mn`, гэрчилгээ тус бүрд 10 с нэмэхгүй); 3 с-д ирсэн OCSP-г өмнөх шигээ CRL-тэй хамт DSS-д
-суулгана. Навч гэрчилгээний (иргэн, TSA) OCSP-г хүчинтэй CRL байсан ч таслахгүй — энгийн 10 с timeout-оор бүтэн хүлээнэ
-(саяхан цуцлагдсан гэрчилгээ дахин гаргаагүй CRL-ээр давахгүй). Хүчинтэй CRL-гүй гэрчилгээний OCSP мөн энгийн 10 с
-timeout-тай; аль нь ч хүчинтэй биш бол `LTV_UNAVAILABLE` (fail-closed).
+thisUpdate ≥ одоо − 24 ц) байна.
+
+**Цуцлалтын эх сурвалжийн дараалал (гэрчилгээний үүргээр, хостын нэрээр биш):**
+
+- **Навч** — гинж бүрийн эхний гэрчилгээ (иргэн, TSA): **OCSP эхэлж**, энгийн 10 с timeout-оор бүтэн (thisUpdate нь
+  timestamp-аас хожуу байх, дахин оролдлоготой). CRL-ийг мөн татна: хоёулаа хүчинтэй бол хоёуланг нь DSS-д суулгана,
+  хүчинтэй OCSP авч чадаагүй бол CRL хангана.
+- **CA** — гинжийн эхнийхээс хойшх гэрчилгээ бүр: **CRL эхэлж**. Олгогчийн хүчинтэй CRL (гарын үсэг, хугацаа, `esign.gov.mn`
+  → eID толин хуулбар) авбал тэр гэрчилгээнд **OCSP хүсэлт огт илгээхгүй** (жишээ нь хариулдаггүй `ocsp.esign.gov.mn` руу
+  очихгүй). CRL байхгүй / татаж чадаагүй / хүчингүй / хугацаа дууссан үед л OCSP (энгийн 10 с timeout).
+- Навчны OCSP-г эхэнд нь зэрэг эхлүүлж, CRL-ийг гинжийн дарааллаар татна (нэг цуглуулалтын дотор CRL-ийг дахин татахгүй,
+  хариу 4 MiB-аар хязгаартай); үр дүнг гинжийн дарааллаар DSS-д нэмнэ. Аль нэг эх сурвалжийн «revoked» — хатуу алдаа;
+  гэрчилгээнд хүчинтэй CRL ч, OCSP ч байхгүй бол `LTV_UNAVAILABLE` (fail-closed).
 
 ## Байгууллагын тамга (e-Seal)
 
@@ -305,12 +312,11 @@ without a certificate, signing or network and returns the resolved page, rect, s
 carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
 builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
 issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is
-`CertificateRevokedException` (do not retry). OCSP and CRL are fetched concurrently: once a CA certificate has a valid
-CRL from its issuer, its OCSP responder gets at most 3 s from the start of collection (a responder that accepts the
-connection but never answers no longer adds 10 s per certificate); an OCSP answer within that window is still embedded
-next to the CRL. The leaf certificates (signer, TSA) are never cut: their OCSP keeps the full 10 s timeout even with a
-valid CRL, so a freshly revoked certificate cannot pass on a not-yet-reissued CRL. Without a valid CRL, OCSP keeps the
-normal 10 s timeout; neither valid → `LTV_UNAVAILABLE`. Install: `dotnet add package GeregeSystems.EidMongolia.Pades` (nuget.org). This is a native port of the Go
+`CertificateRevokedException` (do not retry). Revocation source order is by certificate role: the **leaf** of each chain
+(signer, TSA) asks **OCSP first** with the full 10 s timeout (its CRL is fetched too and embedded alongside when valid,
+and is the fallback when no valid OCSP answer arrives); every **CA certificate** (each one after the first in a chain)
+uses its issuer's **CRL first** and sends **no OCSP request at all** when that CRL is valid — OCSP (normal 10 s timeout)
+is asked only when no valid CRL can be obtained. Neither valid → `LTV_UNAVAILABLE`. Install: `dotnet add package GeregeSystems.EidMongolia.Pades` (nuget.org). This is a native port of the Go
 reference (`eid-mongolia-sdk-go/pades`, profile `pades-client/1`); CI proves byte-identical output against the Go golden
 vectors on Windows and Linux. No validator is shipped — verification is a hash lookup against the CA registry, full
 cryptographic validation lives in the Go backend SDK. Errors are `EidPadesException` with a stable `Code`.
