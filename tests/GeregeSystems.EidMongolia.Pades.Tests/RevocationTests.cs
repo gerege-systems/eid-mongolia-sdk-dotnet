@@ -166,12 +166,18 @@ public class RevocationTests
             b is null ? new HttpResponseMessage(HttpStatusCode.NotFound) : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(b) };
     }
 
+    /// <summary>
+    /// <paramref name="timeout"/> — HTTP-ийн энгийн timeout-ыг (Fetcher-ийн 10 с-ийг дуурайж) HttpClient.Timeout-оор богиносгоно;
+    /// <paramref name="chains"/> — өгөөгүй бол иргэний гинж.
+    /// </summary>
     private static Task<DssData> Collect(byte[]? ocsp, byte[]? crl, Func<string, CancellationToken, Task>? delay = null, TimeSpan? grace = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, TimeSpan? timeout = null, IReadOnlyList<X509Certificate2>[]? chains = null)
     {
-        var f = new Fetcher(new HttpClient(new Handler(ocsp, crl, delay)));
+        var http = new HttpClient(new Handler(ocsp, crl, delay));
+        if (timeout is { } t) http.Timeout = t;
+        var f = new Fetcher(http);
         return Ltv.CollectAsync(f, Now, SigningTime, new[] { Cert("root") }, grace ?? Ltv.OcspGrace, ct,
-            new[] { Citizen, Ca04, Cert("03"), Cert("02") });
+            chains ?? new IReadOnlyList<X509Certificate2>[] { new[] { Citizen, Ca04, Cert("03"), Cert("02") } });
     }
 
     // Хариугүй responder (TCP хүлээж аваад хариулдаггүй): ct цуцлагдтал хүлээнэ.
@@ -262,9 +268,9 @@ public class RevocationTests
         Assert.True(idx[0] == 0 && idx[0] < idx[1] && idx[1] < idx[2] && idx[2] < idx[3], string.Join(",", idx));
     }
 
-    /// <summary>04-ийн OCSP хариулдаггүй, CRL хүчинтэй → цонхын дотор CRL-ээр дуусна (өмнө нь 10 с timeout).</summary>
+    /// <summary>04-ийн (CA) OCSP хариулдаггүй, CRL хүчинтэй → цонхын дотор CRL-ээр дуусна (өмнө нь 10 с timeout).</summary>
     [Fact]
-    public async Task DeadOcspFallsBackToCrlWithinGrace()
+    public async Task DeadCaOcspFallsBackToCrlWithinGrace()
     {
         var sw = Stopwatch.StartNew();
         var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(Ca04Ocsp),
@@ -275,18 +281,69 @@ public class RevocationTests
         Assert.Contains(d.Crls, b => b.AsSpan().SequenceEqual(Replayed("GET http://crl.pki.test/03.crl")));
     }
 
-    /// <summary>Хоёр гэрчилгээний OCSP хариугүй → нийт ≈ нэг цонх (гэрчилгээ тус бүрд биш); цонхыг бүтнээр нь өгнө.</summary>
+    /// <summary>
+    /// Хоёр CA гэрчилгээний OCSP хариугүй → нийт ≈ нэг цонх (гэрчилгээ тус бүрд биш); цонхыг бүтнээр нь өгнө. Тестийн PKI-д
+    /// OCSP-тэй CA ганц (04) тул гинжийг OCSP-гүй 02-оор эхлүүлж, иргэн ба 04-ийг хоёуланг нь CA байрлалд (эхнийхээс хойш) тавина.
+    /// </summary>
     [Fact]
-    public async Task DeadOcspsCostOneGraceWindowNotOnePerCertificate()
+    public async Task DeadCaOcspsCostOneGraceWindowNotOnePerCertificate()
     {
         var grace = TimeSpan.FromMilliseconds(1500);
         var sw = Stopwatch.StartNew();
-        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(CitizenOcsp, Ca04Ocsp), grace);
+        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Hang(CitizenOcsp, Ca04Ocsp), grace,
+            chains: new IReadOnlyList<X509Certificate2>[] { new[] { Cert("02"), Citizen, Ca04, Cert("03") } });
         sw.Stop();
         Assert.True(sw.Elapsed >= TimeSpan.FromSeconds(1), "OCSP must get the grace window: " + sw.Elapsed);
         Assert.True(sw.Elapsed < 2 * grace - TimeSpan.FromMilliseconds(100), "dead responders must not add up: " + sw.Elapsed);
         Assert.Empty(d.Ocsps);
         Assert.Equal(4, d.Crls.Count);
+    }
+
+    /// <summary>
+    /// Навчны (иргэний) OCSP цонхоос удаан, CRL хүчинтэй → цонхоор таслахгүй, хүлээгээд DSS-д суулгана (саяхан цуцлагдсан навч
+    /// дахин гаргаагүй CRL-ээр давахгүй).
+    /// </summary>
+    [Fact]
+    public async Task SlowLeafOcspWithValidCrlIsStillAwaitedAndEmbedded()
+    {
+        var ocsp = Ocsp(St.Good, Fresh, Now.AddDays(1));
+        var sw = Stopwatch.StartNew();
+        var d = await Collect(ocsp, Crl("04", Now.AddHours(-1), Now.AddDays(1), false), Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)),
+            TimeSpan.FromMilliseconds(200));
+        sw.Stop();
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(700), sw.Elapsed.ToString());
+        Assert.Equal(2, d.Ocsps.Count);
+        Assert.Equal(ocsp, d.Ocsps[0]);
+    }
+
+    /// <summary>TSA гинжийн навчны OCSP мөн цонхоор таслагдахгүй (гинж бүрийн эхний гэрчилгээ).</summary>
+    [Fact]
+    public async Task SlowTsaLeafOcspWithValidCrlIsStillAwaitedAndEmbedded()
+    {
+        var tsa = Cert("tsa");
+        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), Crl("04", Now.AddHours(-1), Now.AddDays(1), false),
+            Slow(CitizenOcsp, TimeSpan.FromMilliseconds(800)), TimeSpan.FromMilliseconds(200),
+            chains: new IReadOnlyList<X509Certificate2>[] { new[] { Citizen, Ca04, Cert("03"), Cert("02") }, new[] { tsa, Ca04, Cert("03"), Cert("02") } });
+        Assert.Equal(3, d.Ocsps.Count);
+        Assert.Contains(d.Ocsps, b => Revocation.OcspCertIdMatches(b, tsa, Ca04));
+    }
+
+    /// <summary>
+    /// Навчны OCSP хариугүй, CRL хүчинтэй → цонхоор биш, энгийн timeout бүтэн дууссаны дараа CRL-ээр (v0.15.0-аас өмнөх шиг).
+    /// Timeout-ыг HttpClient.Timeout-оор 1 с болгож тестийг хурдан байлгана.
+    /// </summary>
+    [Fact]
+    public async Task HangingLeafOcspWithValidCrlFallsBackAfterFullTimeout()
+    {
+        var crl = Crl("04", Now.AddHours(-1), Now.AddDays(1), false);
+        var sw = Stopwatch.StartNew();
+        var d = await Collect(Ocsp(St.Good, Fresh, Now.AddDays(1)), crl, Hang(CitizenOcsp), TimeSpan.FromMilliseconds(100),
+            timeout: TimeSpan.FromSeconds(1));
+        sw.Stop();
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(900), "leaf OCSP must get the full timeout, not the grace: " + sw.Elapsed);
+        Assert.Single(d.Ocsps); // 04-ийнх л
+        Assert.True(Revocation.OcspCertIdMatches(d.Ocsps[0], Ca04, Cert("03")));
+        Assert.Equal(crl, d.Crls[0]);
     }
 
     /// <summary>Хүчинтэй CRL-гүй бол удаан OCSP-г цонхоор таслахгүй (fail-closed, өмнөхтэй ижил).</summary>
