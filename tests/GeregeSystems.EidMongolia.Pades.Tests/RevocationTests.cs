@@ -338,15 +338,20 @@ public class RevocationTests
         new object[] { "garbage", new byte[] { 0x30, 0x03, 0x02, 0x01, 0x00 } },
     };
 
-    /// <summary>04-ийн (CA) хүчинтэй CRL авч чадаагүй → OCSP нөөц (golden replay-ийн ocsp/03 хариу), гинжийн дарааллаар.</summary>
+    /// <summary>04-ийн (CA) OCSP хариу — 03-ийн түлхүүрээр зурсан, 04-ийн CertID (golden-д CA OCSP fixture байхгүй).</summary>
+    private static byte[] CaOcsp(St st) =>
+        OcspResponse(WithKey("03"), Cert("03"), Cms.Serial(Ca04), st, Fresh, Now.AddDays(1), keyFrom: Cert("03"));
+
+    /// <summary>04-ийн (CA) хүчинтэй CRL авч чадаагүй → OCSP нөөц, гинжийн дарааллаар.</summary>
     [Theory]
     [MemberData(nameof(CaCrlUnusable))]
     public async Task CaWithoutValidCrlFallsBackToOcsp(string name, byte[]? caCrl)
     {
-        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = caCrl });
+        var caOcsp = CaOcsp(St.Good);
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = caCrl, [Ca04Ocsp] = caOcsp });
         var d = await Collect(null, null, handler: h);
         Assert.Contains(Ca04Ocsp, h.Seen);
-        Assert.True(d.Ocsps.Count == 2 && Revocation.OcspCertIdMatches(d.Ocsps[1], Ca04, Cert("03")), name);
+        Assert.True(d.Ocsps.Count == 2 && d.Ocsps[1].AsSpan().SequenceEqual(caOcsp), name);
         Assert.Equal(3, d.Crls.Count); // иргэн, 03, 02-ийнх — 04-ийн хүчингүй CRL суухгүй
     }
 
@@ -354,12 +359,14 @@ public class RevocationTests
     [Fact]
     public async Task SlowCaOcspFallbackIsAwaited()
     {
-        var h = new Handler(GoodOcsp, CleanCrl, Slow(Ca04Ocsp, TimeSpan.FromMilliseconds(800)), new Dictionary<string, byte[]?> { [Ca04Crl] = null });
+        var caOcsp = CaOcsp(St.Good);
+        var h = new Handler(GoodOcsp, CleanCrl, Slow(Ca04Ocsp, TimeSpan.FromMilliseconds(800)),
+            new Dictionary<string, byte[]?> { [Ca04Crl] = null, [Ca04Ocsp] = caOcsp });
         var sw = Stopwatch.StartNew();
         var d = await Collect(null, null, handler: h);
         sw.Stop();
         Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(700), sw.Elapsed.ToString());
-        Assert.True(d.Ocsps.Count == 2 && Revocation.OcspCertIdMatches(d.Ocsps[1], Ca04, Cert("03")));
+        Assert.True(d.Ocsps.Count == 2 && d.Ocsps[1].AsSpan().SequenceEqual(caOcsp));
     }
 
     /// <summary>CA: хүчинтэй CRL ч, хүчинтэй OCSP ч алга → өмнөх шигээ LTV incomplete (fail-closed).</summary>
@@ -384,8 +391,7 @@ public class RevocationTests
     [Fact]
     public Task RevokedCaViaOcspFallbackIsHardFailure()
     {
-        var revoked = OcspResponse(WithKey("03"), Cert("03"), Cms.Serial(Ca04), St.Revoked, Fresh, Now.AddDays(1), keyFrom: Cert("03"));
-        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = null, [Ca04Ocsp] = revoked });
+        var h = new Handler(GoodOcsp, CleanCrl, over: new Dictionary<string, byte[]?> { [Ca04Crl] = null, [Ca04Ocsp] = CaOcsp(St.Revoked) });
         return Assert.ThrowsAsync<CertificateRevokedException>(() => Collect(null, null, handler: h));
     }
 

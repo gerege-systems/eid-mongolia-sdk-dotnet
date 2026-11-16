@@ -10,13 +10,14 @@
 - **Яагаад:** эзний шийдвэр (2026-11-16): шаардлагагүй үед үндэсний CA-ийн OCSP responder (`ocsp.esign.gov.mn`, хариулдаггүй)
   руу огт хандахгүй — CA гэрчилгээг CRL хангана. Дүрэм нь хостын нэрээр биш, гэрчилгээний үүргээр. Go/TS/Swift/Android
   SDK-тай ижил дүрэм.
-- **Үр дагавар:** эрүүл гинжийн DSS өөрчлөгдөнө — CA гэрчилгээ зөвхөн CRL өгнө (OCSP хариугүй). Golden гаралтууд
-  (`testdata/golden`, Go reference-ээс `build/go-sdk.ref`-ээр синк) шинэ дүрмээр Go репод дахин үүсгэгдэж, ref шинэчлэгдэх
-  ёстой.
-- **Хаана:** `src/…/Crypto/Ltv.cs`, `tests/…/RevocationTests.cs`, README (LTV/цуцлалтын дараалал, English).
+- **Үр дагавар:** эрүүл гинжийн DSS өөрчлөгдөнө — CA гэрчилгээ зөвхөн CRL өгнө (OCSP хариугүй). Golden-ууд Go reference
+  `pades-golden-v11` (`build/go-sdk.ref` = d5a68ae) руу синк: DSS-ээс 04-ийн CA OCSP хасагдсан, 2 дахь гарын үсгийн 14
+  тохиолдол шинэ TSA fixture-тэй; CA OCSP fixture (`ocsp.pki.test/03`) хасагдсан тул CA нөөц OCSP-ийн тестүүд хариугаа
+  03-ийн тестийн түлхүүрээр өөрөө үүсгэнэ.
+- **Хаана:** `src/…/Crypto/Ltv.cs`, `tests/…/RevocationTests.cs`, `build/go-sdk.ref` + `testdata/golden`, README (LTV/цуцлалтын дараалал, English).
 - **Шалгасан:** PR-ийн CI (Windows + Linux) `dotnet test`. Шинэ тест: хүчинтэй CRL-тэй CA → хариугүй responder руу OCSP
   хүсэлт 0 (fake transport бүртгэлээр), шууд дуусна; дүрэм байрлалаар (CA байрлал дахь гэрчилгээ бүр); CA CRL-гүй / хугацаа
   дууссан / буруу олгогч / задрахгүй → OCSP нөөц; удаан CA OCSP нөөц хүлээгдэнэ; CA CRL ч OCSP ч алга → LTV incomplete;
   CA CRL-д цуцлагдсан → хатуу алдаа (OCSP хүсэлтгүй), CA OCSP нөөц revoked → хатуу алдаа; навч: удаан OCSP хүлээгдэнэ,
   хариугүй навч OCSP → бүтэн timeout-ын дараа CRL; дуудагчийн цуцлалт (навч ба CA нөөц OCSP үед).
-- **Үлдсэн:** golden-ууд Go reference-д шинэ дүрмээр дахин үүсгэгдэх хүртэл `GoldenTests` улаан (DSS байт өөр).
+- **Үлдсэн:** —
