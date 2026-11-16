@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Net.Http;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography.X509Certificates;
@@ -25,9 +24,9 @@ internal sealed class NotFreshException : LtvException
 /// DSS (B-LT) цуглуулалт — Go reference ltv.go: гэрчилгээ бүрийн AIA OCSP (SHA-1 CertID) ба CDP CRL; CertID, олгогч,
 /// шинэлэг байдал (<see cref="Revocation.FreshAt"/>, одоогийн цагаар) шалгана, fail-closed. Олгогчийн гарын үсэгтэй «revoked»
 /// хариу (OCSP эсвэл CRL) — <see cref="CertificateRevokedException"/>, тэр дор нь зогсоно (өөр URL/CRL-ээр «good» хайхгүй,
-/// дахин оролдохгүй). OCSP ба CRL-ийг зэрэг татна; хүчинтэй CRL-тэй CA гэрчилгээний OCSP-г <see cref="Ltv.OcspGrace"/>-ээс
-/// удаан хүлээхгүй (хариугүй OCSP responder гарын үсгийг гэрчилгээ тус бүрд 10 с саатуулахгүй). Гинж бүрийн эхний (навч:
-/// иргэн, TSA) гэрчилгээний OCSP-г хүчинтэй CRL байсан ч энгийн timeout-оор бүтэн хүлээнэ.
+/// дахин оролдохгүй). Эх сурвалжийн дараалал гэрчилгээний үүргээр (2026-11-16): гинж бүрийн эхний (навч: иргэн, TSA)
+/// гэрчилгээ — OCSP эхэлж (энгийн timeout), CRL нөөц (хоёулаа хүчинтэй бол хоёуланг нь суулгана); CA гэрчилгээ (эхнийхээс
+/// хойшх) — CRL эхэлж, олгогчийн хүчинтэй CRL авбал OCSP хүсэлт огт илгээхгүй, авч чадаагүй үед л OCSP (энгийн timeout).
 /// </summary>
 internal static class Ltv
 {
@@ -61,24 +60,12 @@ internal static class Ltv
     }
 
     /// <summary>
-    /// OCSP-ийн хүлээх цонх: CA гэрчилгээ (гинжийн эхнийхээс хойшх байрлал) олгогчийн хүчинтэй CRL-тэй бол түүний OCSP-г
-    /// цуглуулалт эхэлснээс хойш хамгийн ихдээ ийм хугацаа хүлээгээд цуцална (LT-г CRL хангана). Хүчинтэй CRL-гүй бол, мөн
-    /// гинж бүрийн эхний (навч: иргэн, TSA) гэрчилгээнд OCSP нь <see cref="Fetcher"/>-ийн энгийн timeout-ыг бүтнээр авна —
-    /// саяхан цуцлагдсан навч дахин гаргаагүй CRL-ээр зөвхөн OCSP удааширснаас болж давахгүй, навчны «thisUpdate &gt; timestamp»
-    /// дахин оролдлого бүтэн цонхоо авна. Хариугүй CA responder (TCP хүлээж аваад хариулдаггүй) гэрчилгээ бүрт 10 с идэхгүй.
-    /// </summary>
-    internal static readonly TimeSpan OcspGrace = TimeSpan.FromSeconds(3);
-
-    public static Task<DssData> CollectAsync(Fetcher f, DateTimeOffset now, DateTimeOffset after, IReadOnlyList<X509Certificate2> roots,
-        CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains) =>
-        CollectAsync(f, now, after, roots, OcspGrace, ct, chains);
-
-    /// <summary>
-    /// Гинжийн бүх гэрчилгээний OCSP-г зэрэг эхлүүлж (POST, кэшгүй), CRL-ийг гинжийн дарааллаар (GET кэш) татна; үр дүнг
-    /// гинжийн дарааллаар DSS-д нэмнэ — DSS-ийн агуулга/дараалал ба алдааны давуу эрэмбэ дараалсан хувилбартай ижил.
+    /// Навч гэрчилгээнүүдийн OCSP-г эхэнд нь зэрэг эхлүүлж (POST, кэшгүй), CRL-ийг гинжийн дарааллаар (GET кэш — нэг
+    /// цуглуулалт/дахин оролдлогын дотор CRL-ийг дахин татахгүй; Fetcher-ийн GET зэрэг биш) татна. CA гэрчилгээний OCSP-г зөвхөн
+    /// хүчинтэй CRL олдоогүй үед, гинжийн дарааллаар асууна. Үр дүнг гинжийн дарааллаар DSS-д нэмнэ (тодорхойлогдсон).
     /// </summary>
     public static async Task<DssData> CollectAsync(Fetcher f, DateTimeOffset now, DateTimeOffset after, IReadOnlyList<X509Certificate2> roots,
-        TimeSpan ocspGrace, CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains)
+        CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains)
     {
         var d = new DssData();
         void AddCert(X509Certificate2 c)
@@ -124,10 +111,9 @@ internal static class Ltv
             }
         }
 
-        var started = Stopwatch.GetTimestamp();
         foreach (var j in jobs)
         {
-            if (j.Issuer is null) continue;
+            if (j.Issuer is null || !j.Leaf) continue;
             j.Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             j.Ocsp = OcspAsync(f, j.Cert, j.Issuer, now, j.Fresh, j.Cts.Token, ct);
         }
@@ -156,16 +142,10 @@ internal static class Ltv
                         ok = true;
                     }
                 }
-                var ocspTask = j.Ocsp!;
-                if (ok && !j.Leaf && !ocspTask.IsCompleted)
-                {
-                    // CA гэрчилгээ, хүчинтэй CRL бий — OCSP-г цонхны үлдсэн хугацаанд л хүлээнэ (цонх дууссан бол одоо цуцална).
-                    // Навчны OCSP-г таслахгүй: энгийн timeout-оор бүтэн хүлээнэ.
-                    var left = ocspGrace - Stopwatch.GetElapsedTime(started);
-                    if (left > TimeSpan.Zero) j.Cts!.CancelAfter(left);
-                    else j.Cts!.Cancel();
-                }
-                var o = await ocspTask.ConfigureAwait(false);
+                OcspOutcome o;
+                if (j.Leaf) o = await j.Ocsp!.ConfigureAwait(false); // навч: OCSP энгийн timeout-оор бүтэн
+                else if (ok) continue; // CA, хүчинтэй CRL — OCSP хүсэлт илгээхгүй
+                else o = await OcspAsync(f, c, issuer, now, null, ct, ct).ConfigureAwait(false); // CA, CRL-гүй — OCSP нөөц
                 o.Error?.Throw();
                 if (o.Der is not null)
                 {
@@ -185,7 +165,7 @@ internal static class Ltv
         }
         finally
         {
-            // Алдаа/цуцлалтаар гарвал үлдсэн OCSP-г цуцалж дуусахыг нь хүлээнэ (OcspAsync хэзээ ч fault болохгүй).
+            // Алдаа/цуцлалтаар гарвал үлдсэн навчны OCSP-г цуцалж дуусахыг нь хүлээнэ (OcspAsync хэзээ ч fault болохгүй).
             foreach (var j in jobs) j.Cts?.Cancel();
             foreach (var j in jobs)
             {
@@ -211,9 +191,10 @@ internal static class Ltv
         /// <summary>Гинжийн эхний (навч) гэрчилгээ: OCSP thisUpdate нь timestamp-аас хожуу байх ёстой.</summary>
         public DateTimeOffset? Fresh { get; }
 
-        /// <summary>Гинжийн эхний гэрчилгээ (иргэн/TSA) — OCSP-г <see cref="Ltv.OcspGrace"/>-ээр таслахгүй.</summary>
+        /// <summary>Гинжийн эхний гэрчилгээ (иргэн/TSA) — OCSP эхэлж (эхэнд нь зэрэг эхэлнэ); бусад нь CA — CRL эхэлж.</summary>
         public bool Leaf => Fresh is not null;
 
+        /// <summary>Навчны урьдчилан эхлүүлсэн OCSP (CA-д null).</summary>
         public CancellationTokenSource? Cts { get; set; }
         public Task<OcspOutcome>? Ocsp { get; set; }
     }
@@ -222,7 +203,8 @@ internal static class Ltv
 
     /// <summary>
     /// Нэг гэрчилгээний AIA OCSP-уудыг дарааллаар (эхний хүчинтэй хариу). Шалгалт <c>FetchOcspAsync</c>-д өөрчлөлтгүй.
-    /// <paramref name="token"/> — цонх/дуудагчийн цуцлалт; <paramref name="ct"/> — зөвхөн дуудагчийнх (Soft-ын ялгаанд).
+    /// <paramref name="token"/> — цуглуулалтын (алдаагаар гарахад) эсвэл дуудагчийн цуцлалт; <paramref name="ct"/> — зөвхөн
+    /// дуудагчийнх (Soft-ын ялгаанд).
     /// Хэзээ ч fault болохгүй: soft биш алдаа (revoked, дуудагчийн цуцлалт г.м.) <c>OcspOutcome.Error</c>-д очиж,
     /// дуудагч гинжийн дарааллаар дахин шиднэ.
     /// </summary>
@@ -247,7 +229,7 @@ internal static class Ltv
                 }
                 catch (Exception e) when (Soft(e, ct))
                 {
-                    if (token.IsCancellationRequested) break; // цонх дууссан — үлдсэн URL-ийг асуухгүй
+                    if (token.IsCancellationRequested) break; // цуглуулалт цуцлагдсан — үлдсэн URL-ийг асуухгүй
                 }
             }
             return new OcspOutcome(urls.Count > 0, null, null, freshErr, null);
