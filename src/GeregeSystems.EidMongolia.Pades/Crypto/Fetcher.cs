@@ -8,7 +8,10 @@ using System.Threading.Tasks;
 
 namespace GeregeSystems.EidMongolia.Pades.Crypto;
 
-/// <summary>TSA/OCSP/CRL HTTP — зөвхөн http/https, 10 с timeout, redirect дагахгүй, 200 биш эсвэл 4 MiB-аас их бол алдаа; GET кэштэй.</summary>
+/// <summary>
+/// TSA/OCSP/CRL HTTP — зөвхөн http/https, 10 с timeout, redirect дагахгүй, 200 биш эсвэл 4 MiB-аас их бол алдаа; GET кэштэй.
+/// Кэш нь thread-safe биш: GET-ийг зэрэг дуудахгүй (Ltv зөвхөн OCSP POST-ыг зэрэг явуулна, CRL GET дарааллаар).
+/// </summary>
 internal sealed class Fetcher : IDisposable
 {
     private const int MaxResponse = 4 << 20;

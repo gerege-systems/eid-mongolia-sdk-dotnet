@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,7 +25,8 @@ internal sealed class NotFreshException : LtvException
 /// DSS (B-LT) цуглуулалт — Go reference ltv.go: гэрчилгээ бүрийн AIA OCSP (SHA-1 CertID) ба CDP CRL; CertID, олгогч,
 /// шинэлэг байдал (<see cref="Revocation.FreshAt"/>, одоогийн цагаар) шалгана, fail-closed. Олгогчийн гарын үсэгтэй «revoked»
 /// хариу (OCSP эсвэл CRL) — <see cref="CertificateRevokedException"/>, тэр дор нь зогсоно (өөр URL/CRL-ээр «good» хайхгүй,
-/// дахин оролдохгүй).
+/// дахин оролдохгүй). OCSP ба CRL-ийг зэрэг татна; хүчинтэй CRL-тэй гэрчилгээний OCSP-г <see cref="Ltv.OcspGrace"/>-ээс
+/// удаан хүлээхгүй (хариугүй OCSP responder гарын үсгийг гэрчилгээ тус бүрд 10 с саатуулахгүй).
 /// </summary>
 internal static class Ltv
 {
@@ -56,8 +59,24 @@ internal static class Ltv
         }
     }
 
+    /// <summary>
+    /// OCSP-ийн хүлээх цонх: гэрчилгээ олгогчийн хүчинтэй CRL-тэй бол түүний OCSP-г цуглуулалт эхэлснээс хойш хамгийн ихдээ
+    /// ийм хугацаа хүлээгээд цуцална (LT-г CRL хангана). Хүчинтэй CRL-гүй бол OCSP нь <see cref="Fetcher"/>-ийн энгийн
+    /// timeout-ыг бүтнээр авна (fail-closed хэвээр). Хариугүй responder (TCP хүлээж аваад хариулдаггүй) гэрчилгээ бүрт 10 с
+    /// идэхгүй.
+    /// </summary>
+    internal static readonly TimeSpan OcspGrace = TimeSpan.FromSeconds(3);
+
+    public static Task<DssData> CollectAsync(Fetcher f, DateTimeOffset now, DateTimeOffset after, IReadOnlyList<X509Certificate2> roots,
+        CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains) =>
+        CollectAsync(f, now, after, roots, OcspGrace, ct, chains);
+
+    /// <summary>
+    /// Гинжийн бүх гэрчилгээний OCSP-г зэрэг эхлүүлж (POST, кэшгүй), CRL-ийг гинжийн дарааллаар (GET кэш) татна; үр дүнг
+    /// гинжийн дарааллаар DSS-д нэмнэ — DSS-ийн агуулга/дараалал ба алдааны давуу эрэмбэ дараалсан хувилбартай ижил.
+    /// </summary>
     public static async Task<DssData> CollectAsync(Fetcher f, DateTimeOffset now, DateTimeOffset after, IReadOnlyList<X509Certificate2> roots,
-        CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains)
+        TimeSpan ocspGrace, CancellationToken ct, params IReadOnlyList<X509Certificate2>[] chains)
     {
         var d = new DssData();
         void AddCert(X509Certificate2 c)
@@ -89,6 +108,7 @@ internal static class Ltv
             return false;
         }
 
+        var jobs = new List<Job>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var ch in chains)
         {
@@ -98,30 +118,25 @@ internal static class Ltv
                 var key = Convert.ToBase64String(c.RawData);
                 if (seen.Contains(key) || IsRoot(c)) continue;
                 seen.Add(key);
+                jobs.Add(new Job(c, IssuerOf(c), i == 0 ? after : null));
+            }
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        foreach (var j in jobs)
+        {
+            if (j.Issuer is null) continue;
+            j.Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            j.Ocsp = OcspAsync(f, j.Cert, j.Issuer, now, j.Fresh, j.Cts.Token, ct);
+        }
+        try
+        {
+            foreach (var j in jobs)
+            {
+                var c = j.Cert;
                 AddCert(c);
-                var issuer = IssuerOf(c) ?? throw new LtvException("LTV incomplete: issuer of " + Revocation.CertRef(c) + " not found");
+                var issuer = j.Issuer ?? throw new LtvException("LTV incomplete: issuer of " + Revocation.CertRef(c) + " not found");
                 bool ok = false;
-                NotFreshException? freshErr = null;
-                DateTimeOffset? fresh = i == 0 ? after : null;
-                var ocspUrls = X509Util.OcspServers(c);
-                foreach (var u in ocspUrls)
-                {
-                    try
-                    {
-                        var (der, resp) = await FetchOcspAsync(f, u, c, issuer, now, fresh, ct).ConfigureAwait(false);
-                        Add(d.Ocsps, der);
-                        if (resp.Certificate is not null && !X509Util.Equal(resp.Certificate, issuer)) AddCert(resp.Certificate);
-                        ok = true;
-                        break;
-                    }
-                    catch (NotFreshException e)
-                    {
-                        freshErr = e;
-                    }
-                    catch (Exception e) when (Soft(e, ct))
-                    {
-                    }
-                }
                 foreach (var u in X509Util.CrlDistributionPoints(c))
                 {
                     byte[] der;
@@ -139,16 +154,102 @@ internal static class Ltv
                         ok = true;
                     }
                 }
+                var ocspTask = j.Ocsp!;
+                if (ok && !ocspTask.IsCompleted)
+                {
+                    // Хүчинтэй CRL бий — OCSP-г цонхны үлдсэн хугацаанд л хүлээнэ (цонх дууссан бол одоо цуцална).
+                    var left = ocspGrace - Stopwatch.GetElapsedTime(started);
+                    if (left > TimeSpan.Zero) j.Cts!.CancelAfter(left);
+                    else j.Cts!.Cancel();
+                }
+                var o = await ocspTask.ConfigureAwait(false);
+                o.Error?.Throw();
+                if (o.Der is not null)
+                {
+                    Add(d.Ocsps, o.Der);
+                    if (o.Resp!.Certificate is not null && !X509Util.Equal(o.Resp.Certificate, issuer)) AddCert(o.Resp.Certificate);
+                    ok = true;
+                }
+                var freshErr = o.FreshErr;
                 if (!ok)
                 {
                     if (freshErr is not null) throw new NotFreshException(freshErr.Message + ": " + Revocation.CertRef(c));
                     throw new LtvException("LTV incomplete: no valid OCSP/CRL for " + Revocation.CertRef(c));
                 }
-                if (i == 0 && freshErr is not null && ocspUrls.Count > 0 && !HasFreshOcsp(d.Ocsps, c, issuer, after))
+                if (j.Fresh is not null && freshErr is not null && o.HadUrls && !HasFreshOcsp(d.Ocsps, c, issuer, after))
                     throw new NotFreshException(freshErr.Message + ": " + Revocation.CertRef(c));
             }
         }
+        finally
+        {
+            // Алдаа/цуцлалтаар гарвал үлдсэн OCSP-г цуцалж дуусахыг нь хүлээнэ (OcspAsync хэзээ ч fault болохгүй).
+            foreach (var j in jobs) j.Cts?.Cancel();
+            foreach (var j in jobs)
+            {
+                if (j.Ocsp is not null) await j.Ocsp.ConfigureAwait(false);
+                j.Cts?.Dispose();
+            }
+        }
         return d;
+    }
+
+    private sealed class Job
+    {
+        public Job(X509Certificate2 cert, X509Certificate2? issuer, DateTimeOffset? fresh)
+        {
+            Cert = cert;
+            Issuer = issuer;
+            Fresh = fresh;
+        }
+
+        public X509Certificate2 Cert { get; }
+        public X509Certificate2? Issuer { get; }
+
+        /// <summary>Гинжийн эхний (навч) гэрчилгээ: OCSP thisUpdate нь timestamp-аас хожуу байх ёстой.</summary>
+        public DateTimeOffset? Fresh { get; }
+
+        public CancellationTokenSource? Cts { get; set; }
+        public Task<OcspOutcome>? Ocsp { get; set; }
+    }
+
+    private sealed record OcspOutcome(bool HadUrls, byte[]? Der, OcspResponse? Resp, NotFreshException? FreshErr, ExceptionDispatchInfo? Error);
+
+    /// <summary>
+    /// Нэг гэрчилгээний AIA OCSP-уудыг дарааллаар (эхний хүчинтэй хариу). Шалгалт <c>FetchOcspAsync</c>-д өөрчлөлтгүй.
+    /// <paramref name="token"/> — цонх/дуудагчийн цуцлалт; <paramref name="ct"/> — зөвхөн дуудагчийнх (Soft-ын ялгаанд).
+    /// Хэзээ ч fault болохгүй: soft биш алдаа (revoked, дуудагчийн цуцлалт г.м.) <c>OcspOutcome.Error</c>-д очиж,
+    /// дуудагч гинжийн дарааллаар дахин шиднэ.
+    /// </summary>
+    private static async Task<OcspOutcome> OcspAsync(Fetcher f, X509Certificate2 c, X509Certificate2 issuer, DateTimeOffset now,
+        DateTimeOffset? fresh, CancellationToken token, CancellationToken ct)
+    {
+        var urls = new List<string>();
+        NotFreshException? freshErr = null;
+        try
+        {
+            urls = X509Util.OcspServers(c);
+            foreach (var u in urls)
+            {
+                try
+                {
+                    var (der, resp) = await FetchOcspAsync(f, u, c, issuer, now, fresh, token).ConfigureAwait(false);
+                    return new OcspOutcome(true, der, resp, null, null);
+                }
+                catch (NotFreshException e)
+                {
+                    freshErr = e;
+                }
+                catch (Exception e) when (Soft(e, ct))
+                {
+                    if (token.IsCancellationRequested) break; // цонх дууссан — үлдсэн URL-ийг асуухгүй
+                }
+            }
+            return new OcspOutcome(urls.Count > 0, null, null, freshErr, null);
+        }
+        catch (Exception e)
+        {
+            return new OcspOutcome(urls.Count > 0, null, null, null, ExceptionDispatchInfo.Capture(e));
+        }
     }
 
     /// <summary>Нэг URL-ийн алдаа (сүлжээ, задлалт, timeout) — дараагийн URL руу; дуудагчийн цуцлалт биш.</summary>
