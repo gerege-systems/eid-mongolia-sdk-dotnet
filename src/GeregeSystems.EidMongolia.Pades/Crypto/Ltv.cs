@@ -25,8 +25,9 @@ internal sealed class NotFreshException : LtvException
 /// DSS (B-LT) цуглуулалт — Go reference ltv.go: гэрчилгээ бүрийн AIA OCSP (SHA-1 CertID) ба CDP CRL; CertID, олгогч,
 /// шинэлэг байдал (<see cref="Revocation.FreshAt"/>, одоогийн цагаар) шалгана, fail-closed. Олгогчийн гарын үсэгтэй «revoked»
 /// хариу (OCSP эсвэл CRL) — <see cref="CertificateRevokedException"/>, тэр дор нь зогсоно (өөр URL/CRL-ээр «good» хайхгүй,
-/// дахин оролдохгүй). OCSP ба CRL-ийг зэрэг татна; хүчинтэй CRL-тэй гэрчилгээний OCSP-г <see cref="Ltv.OcspGrace"/>-ээс
-/// удаан хүлээхгүй (хариугүй OCSP responder гарын үсгийг гэрчилгээ тус бүрд 10 с саатуулахгүй).
+/// дахин оролдохгүй). OCSP ба CRL-ийг зэрэг татна; хүчинтэй CRL-тэй CA гэрчилгээний OCSP-г <see cref="Ltv.OcspGrace"/>-ээс
+/// удаан хүлээхгүй (хариугүй OCSP responder гарын үсгийг гэрчилгээ тус бүрд 10 с саатуулахгүй). Гинж бүрийн эхний (навч:
+/// иргэн, TSA) гэрчилгээний OCSP-г хүчинтэй CRL байсан ч энгийн timeout-оор бүтэн хүлээнэ.
 /// </summary>
 internal static class Ltv
 {
@@ -60,10 +61,11 @@ internal static class Ltv
     }
 
     /// <summary>
-    /// OCSP-ийн хүлээх цонх: гэрчилгээ олгогчийн хүчинтэй CRL-тэй бол түүний OCSP-г цуглуулалт эхэлснээс хойш хамгийн ихдээ
-    /// ийм хугацаа хүлээгээд цуцална (LT-г CRL хангана). Хүчинтэй CRL-гүй бол OCSP нь <see cref="Fetcher"/>-ийн энгийн
-    /// timeout-ыг бүтнээр авна (fail-closed хэвээр). Хариугүй responder (TCP хүлээж аваад хариулдаггүй) гэрчилгээ бүрт 10 с
-    /// идэхгүй.
+    /// OCSP-ийн хүлээх цонх: CA гэрчилгээ (гинжийн эхнийхээс хойшх байрлал) олгогчийн хүчинтэй CRL-тэй бол түүний OCSP-г
+    /// цуглуулалт эхэлснээс хойш хамгийн ихдээ ийм хугацаа хүлээгээд цуцална (LT-г CRL хангана). Хүчинтэй CRL-гүй бол, мөн
+    /// гинж бүрийн эхний (навч: иргэн, TSA) гэрчилгээнд OCSP нь <see cref="Fetcher"/>-ийн энгийн timeout-ыг бүтнээр авна —
+    /// саяхан цуцлагдсан навч дахин гаргаагүй CRL-ээр зөвхөн OCSP удааширснаас болж давахгүй, навчны «thisUpdate &gt; timestamp»
+    /// дахин оролдлого бүтэн цонхоо авна. Хариугүй CA responder (TCP хүлээж аваад хариулдаггүй) гэрчилгээ бүрт 10 с идэхгүй.
     /// </summary>
     internal static readonly TimeSpan OcspGrace = TimeSpan.FromSeconds(3);
 
@@ -155,9 +157,10 @@ internal static class Ltv
                     }
                 }
                 var ocspTask = j.Ocsp!;
-                if (ok && !ocspTask.IsCompleted)
+                if (ok && !j.Leaf && !ocspTask.IsCompleted)
                 {
-                    // Хүчинтэй CRL бий — OCSP-г цонхны үлдсэн хугацаанд л хүлээнэ (цонх дууссан бол одоо цуцална).
+                    // CA гэрчилгээ, хүчинтэй CRL бий — OCSP-г цонхны үлдсэн хугацаанд л хүлээнэ (цонх дууссан бол одоо цуцална).
+                    // Навчны OCSP-г таслахгүй: энгийн timeout-оор бүтэн хүлээнэ.
                     var left = ocspGrace - Stopwatch.GetElapsedTime(started);
                     if (left > TimeSpan.Zero) j.Cts!.CancelAfter(left);
                     else j.Cts!.Cancel();
@@ -207,6 +210,9 @@ internal static class Ltv
 
         /// <summary>Гинжийн эхний (навч) гэрчилгээ: OCSP thisUpdate нь timestamp-аас хожуу байх ёстой.</summary>
         public DateTimeOffset? Fresh { get; }
+
+        /// <summary>Гинжийн эхний гэрчилгээ (иргэн/TSA) — OCSP-г <see cref="Ltv.OcspGrace"/>-ээр таслахгүй.</summary>
+        public bool Leaf => Fresh is not null;
 
         public CancellationTokenSource? Cts { get; set; }
         public Task<OcspOutcome>? Ocsp { get; set; }
