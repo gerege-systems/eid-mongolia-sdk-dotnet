@@ -401,12 +401,17 @@ public class SealTests
         return PlacementTests.Pdf(objs.ToArray());
     }
 
-    /// <summary>Өөрөө зурсан ECDSA P-256 гэрчилгээ, өгсөн өргөтгөлүүдтэй (§6.1-ийн дүрмийг шалгах).</summary>
+    /// <summary>
+    /// Өөрөө зурсан ECDSA P-256 гэрчилгээ (хувийн түлхүүргүй), өгсөн өргөтгөлүүдтэй (§6.1-ийн дүрмийг шалгах). CreateSelfSigned
+    /// биш: түлхүүр холбохдоо .NET keyUsage-ийг өөрийн декодероор уншдаг бөгөөд 9-өөс хойших бит (bit 32)-ийг задалж чадахгүй.
+    /// </summary>
     private static X509Certificate2 Variant(params X509Extension[] extensions)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var req = new CertificateRequest("CN=TEST ONLY Variant", key, HashAlgorithmName.SHA256);
+        var dn = new X500DistinguishedName("CN=TEST ONLY Variant");
+        var req = new CertificateRequest(dn, key, HashAlgorithmName.SHA256);
         foreach (var e in extensions) req.CertificateExtensions.Add(e);
-        return req.CreateSelfSigned(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        return req.Create(dn, X509SignatureGenerator.CreateForECDsa(key), new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), new byte[] { 0x5E, 0xA1, 0x60 });
     }
 }
