@@ -100,8 +100,10 @@ public static partial class EidPades
         {
             throw new EidPadesException("SIGNER_INVALID", "sealCert could not be parsed", e);
         }
+        using var ownedCert = cert;
         if (!IsSealCertificate(cert))
-            throw new EidPadesException("SIGNER_INVALID", "sealCert is not an e-Seal certificate (keyUsage nonRepudiation only, no EKU)");
+            throw new EidPadesException("SIGNER_INVALID",
+                "sealCert is not an e-Seal certificate (must not be a CA; keyUsage nonRepudiation set and digitalSignature clear; no EKU purposes)");
         var name = options.SignerName;
         if (string.IsNullOrWhiteSpace(name) || GoText.TrimSpace(name) == "") name = LastAttr(cert.SubjectName, "2.5.4.3");
 

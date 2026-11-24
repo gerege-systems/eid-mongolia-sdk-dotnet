@@ -355,6 +355,37 @@ public class SealTests
         Assert.Equal(EidPadesErrorCode.PdfTooLarge, ex.Code);
     }
 
+    /// <summary>
+    /// Үл харагдах нөөц зөвхөн автомат дардасны Prepare-д: delegate-ийн алдаа (REQUEST_INVALID код ч) ба цуцлалт нөөц болохгүй,
+    /// delegate нэг л удаа дуудагдаж алдаа өөрчлөгдөхгүй дамжина.
+    /// </summary>
+    [Fact]
+    public async Task CallbackErrorsAndCancellationAreNotFallbacks()
+    {
+        var (seal, key) = Issue(X509KeyUsageFlags.NonRepudiation, "5EA108");
+        using var owned = key;
+        int calls = 0;
+        var thrown = new EidPadesException("REQUEST_INVALID", "from the seal callback");
+        var ex = await Assert.ThrowsAsync<EidPadesException>(() => EidPades.SealAsync(Input(), SealOpts(seal), (_, _) =>
+        {
+            calls++;
+            throw thrown;
+        }));
+        Assert.Same(thrown, ex);
+        Assert.Equal(1, calls);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        calls = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EidPades.SealAsync(Input(), SealOpts(seal), (_, ct) =>
+        {
+            calls++;
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(Array.Empty<byte>());
+        }, cancellationToken: cts.Token));
+        Assert.Equal(1, calls);
+    }
+
     private static SealOptions SealOpts(X509Certificate2 seal) =>
         new() { SealCert = seal.RawData, Chain = Chain(), Reason = "Байгууллагын тамга", SigningTime = SigningTime };
 
