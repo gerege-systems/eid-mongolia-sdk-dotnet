@@ -162,9 +162,21 @@ thisUpdate ≥ одоо − 24 ц) байна.
 ## Байгууллагын тамга (e-Seal)
 
 `EidPades.SealAsync` — PDF-д байгууллагын тамганы гэрчилгээгээр PAdES-BASELINE-LT гарын үсэг суулгана. Иргэн, PIN, апп
-оролцохгүй: SDK DTBS-ийг бэлдээд (verify хуудас, харагдах дүрслэлгүй — тамгыг CA-ийн `/verify/{docId}`-д бүртгэдэггүй)
-таны delegate-ийг дуудна; delegate нь RP backend-ийн өөрийн `HttpClient`-ээр CA `POST /seal/{orgEtsi}` хийж
-`signature.value`-ийг буцаана. SDK энд HTTP client агуулахгүй.
+оролцохгүй: SDK DTBS-ийг бэлдээд (verify хуудасгүй — тамгыг CA-ийн `/verify/{docId}`-д бүртгэдэггүй) таны delegate-ийг
+дуудна; delegate нь RP backend-ийн өөрийн `HttpClient`-ээр CA `POST /seal/{orgEtsi}` хийж `signature.value`-ийг буцаана.
+SDK энд HTTP client агуулахгүй.
+
+**Анхдагчаар тамга харагдана** (Go `SealPDF`, TS `sealPdf`-тэй ижил; Go репогийн `pades/APPEARANCE_SPEC.md` §6):
+баримтын сүүлийн (eID verify биш) хуудсанд байгууллагын тамганы дардас — нэр, «eID Mongolia-аар тамгалсан» / "Sealed with
+eID Mongolia", огноо; QR, холбоос, үүргийн мөргүй. Байршил: 220 × 64 pt, `x = хуудасны өргөн − 256`, `y = 36` (жижиг
+хуудсанд багтаана, жишээ нь 164 pt баримт → 156 × 64, x = 4), агуулгатай давхцвал чөлөөт байрлал руу (дээрх «Харагдах
+гарын үсгийн байршил»). Үр дүн `done.Placement`. Автомат дардас хуудсанд багтахгүй эсвэл гаралтыг 10 MiB-аас хэтрүүлэх
+бол алдаагүйгээр үл харагдах тамга гаргана (`Placement = null`). `SealOptions.Appearance`-аар байршлыг өөрөө өгнө (иргэний
+`Appearance`-тэй ижил талбар; багтахгүй бол `REQUEST_INVALID` / `PDF_TOO_LARGE`). `SealOptions.Invisible = true` — өмнөх
+хувилбартай байт-ижил үл харагдах тамга. Go SDK v0.30.0 / TS SDK 0.48.0-аас өмнөх шалгагчид харагдах тамганы дардастай
+PDF-ийн өмнөх гарын үсгүүдийг өөрчлөгдсөн (modified) гэж мэдээлнэ — тэдгээр шинэчлэгдэх хүртэл `Invisible = true` ашиглана уу.
+Дардасны хувилбарыг зөвхөн гарын үсэг зурагчийн гэрчилгээ сонгоно: e-Seal гэрчилгээгээр `Prepare` + `Appearance` дуудвал
+мөн тамганы дардас зурагдана.
 
 ```csharp
 using System.Net.Http.Headers;
@@ -195,8 +207,8 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 - RP-д `SEAL:<orgEtsi>` эрх хэрэгтэй (үгүй бол 403). 429 — хурдны хязгаар: хэсэг хүлээгээд дахин оролдоно (delegate-ийн
   exception SDK-ээр өөрчлөгдөхгүй дамжина).
 - RFC 3161 timestamp заавал — TSA хүрэхгүй бол `TSA_UNAVAILABLE` (timestamp-гүй тамга гаргахгүй).
-- `SealCert` нь тамганы профайл байх ёстой (KeyUsage = зөвхөн nonRepudiation, digitalSignature үгүй, EKU үгүй) — үгүй бол
-  `SIGNER_INVALID`. Гарын үсэг DTBS / `SealCert`-тэй таарахгүй бол `SIGNATURE_INVALID`.
+- `SealCert` нь тамганы профайл байх ёстой (CA биш, KeyUsage-д nonRepudiation байгаа ба digitalSignature үгүй, EKU-ийн
+  зорилгогүй — extendedKeyUsage алга эсвэл хоосон) — үгүй бол `SIGNER_INVALID`. Гарын үсэг DTBS / `SealCert`-тэй таарахгүй бол `SIGNATURE_INVALID`.
 - Тамганы гэрчилгээг CA / админ консолоор олгоно — энэ SDK-д олгох функц байхгүй.
 
 ## «Миний QR» — иргэний «Миний мэдээлэл» (`GeregeSystems.EidMongolia.Qr`, 0.13.0)
@@ -280,12 +292,20 @@ MIT — [LICENSE](LICENSE). Гуравдагч: Noto Sans (OFL 1.1), digitorus/p
 
 ## English
 
-**Organization e-Seal:** `EidPades.SealAsync(pdf, new SealOptions { SealCert = … }, sealDigest)` prepares an invisible
-signature (no verify page) with the organization's seal certificate (keyUsage nonRepudiation only, no EKU — else
-`SIGNER_INVALID`), calls your delegate with the 32-byte DTBS (your own `HttpClient` → CA `POST /seal/{orgEtsi}`
-`{digest, hashType: "SHA256"}`, return the decoded `signature.value`), then completes to PAdES-BASELINE-LT (timestamp
-mandatory). Needs the RP permission `SEAL:<orgEtsi>`; 429 = retry later; seal certificates are issued by the CA/admin,
-not by this SDK.
+**Organization e-Seal:** `EidPades.SealAsync(pdf, new SealOptions { SealCert = … }, sealDigest)` prepares a signature
+(no verify page) with the organization's seal certificate (not a CA, keyUsage nonRepudiation without digitalSignature, no
+EKU purpose — else `SIGNER_INVALID`), calls your delegate with the 32-byte DTBS (your own `HttpClient` → CA
+`POST /seal/{orgEtsi}` `{digest, hashType: "SHA256"}`, return the decoded `signature.value`), then completes to
+PAdES-BASELINE-LT (timestamp mandatory). **By default the seal is visible** (as Go `SealPDF` / TS `sealPdf`,
+APPEARANCE_SPEC.md §6): an organisation seal stamp (name, "Sealed with eID Mongolia" / «eID Mongolia-аар тамгалсан», date;
+no QR, link or role) on the last page that is not an eID verify page, 220 × 64 pt at `x = pageWidth − 256`, `y = 36`
+(fitted to small pages), moved off existing content; the result is `done.Placement`. When the automatic stamp does not
+fit the page or would push the output over 10 MiB, the seal is written invisible instead (`Placement = null`).
+`SealOptions.Appearance` positions it yourself (same fields as the citizen `Appearance`; `REQUEST_INVALID` /
+`PDF_TOO_LARGE` when it cannot be drawn); `SealOptions.Invisible = true` restores the previous, byte-identical invisible
+seal. Verifiers older than Go SDK v0.30.0 / TS SDK 0.48.0 report earlier signatures as modified on a PDF that received a
+visible seal stamp. Needs the RP permission `SEAL:<orgEtsi>`; 429 = retry later; seal certificates are issued by the
+CA/admin, not by this SDK.
 
 **«My QR» (0.13.0, namespace `GeregeSystems.EidMongolia.Qr`):** `EidQr.Parse` (`EIDMN-QR1:<token>`) →
 `EidQrClient.StartAsync` (`POST /authentication/qr` with an auto 22-char nonce) → `ResultAsync` / `CheckAsync` (long-poll)

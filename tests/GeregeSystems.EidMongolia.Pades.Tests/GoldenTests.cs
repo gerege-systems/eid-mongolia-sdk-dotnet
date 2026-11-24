@@ -61,7 +61,8 @@ public class GoldenTests
 
         var opts = new PrepareOptions
         {
-            SignerCert = Pem("citizen.pem"),
+            // golden v12: "signer": "seal" = pki/seal.pem (e-Seal → тамганы дардас, APPEARANCE_SPEC.md §6); алга = иргэн.
+            SignerCert = Pem(Str(c, "signer") == "seal" ? "seal.pem" : "citizen.pem"),
             Chain = new[] { Pem("04.pem"), Pem("03.pem"), Pem("02.pem") },
             SignerName = Str(p, "signerName"),
             Reason = Str(p, "reason"),
@@ -187,6 +188,61 @@ public class GoldenTests
             Assert.Equal(done.RevIndex == 1 ? done.PageSha256 : null, reg.PageSha256);
             Assert.Equal("PNOMN-00000000000", reg.SignerEtsi);
         }
+    }
+
+    /// <summary>
+    /// golden v12 (APPEARANCE_SPEC.md §6.4): <see cref="EidPades.SealAsync"/> reproduces the seal cases byte for byte —
+    /// seal-visible and seal-visible-third through the automatic placement (no Appearance: page 0 → 356, 36, 220 × 64 on
+    /// Letter), seal-visible-en through an explicit Appearance. The delegate checks the DTBS and returns expect.signature.
+    /// </summary>
+    [Theory]
+    [InlineData("seal-visible", false)]
+    [InlineData("seal-visible-en", true)]
+    [InlineData("seal-visible-third", false)]
+    public async Task SealAsyncMatchesGoReference(string name, bool explicitAppearance)
+    {
+        var c = Case(name);
+        var p = c.GetProperty("prepare");
+        var exp = c.GetProperty("expect");
+        Assert.Equal("seal", Str(c, "signer"));
+        var ap = p.GetProperty("appearance");
+        Appearance? appearance = null;
+        if (explicitAppearance)
+        {
+            appearance = new Appearance
+            {
+                X = ap.GetProperty("x").GetDouble(),
+                Y = ap.GetProperty("y").GetDouble(),
+                Width = ap.GetProperty("width").GetDouble(),
+                Height = ap.GetProperty("height").GetDouble(),
+                Lang = Str(p, "lang"),
+            };
+        }
+        using var http = new HttpClient(new Replay());
+        var nonce = SHA256.HashData(Encoding.UTF8.GetBytes("golden-nonce:" + name).Append((byte)0).ToArray())[..8];
+        var done = await EidPades.SealAsync(Input(c), new SealOptions
+        {
+            SealCert = Pem("seal.pem"),
+            Chain = new[] { Pem("04.pem"), Pem("03.pem"), Pem("02.pem") },
+            Reason = Str(p, "reason"),
+            SigningTime = Time("signingTime"),
+            Appearance = appearance,
+        }, (dtbs, _) =>
+        {
+            Assert.Equal(Str(exp, "dtbs"), Hex(dtbs));
+            return Task.FromResult(Convert.FromHexString(Str(exp, "signature")!));
+        }, new CompleteOptions
+        {
+            TsaUrl = "http://tsa.pki.test/",
+            Roots = new[] { Pem("root.pem") },
+            HttpClient = http,
+            TimeProvider = new FixedTime(Time("now")),
+            NonceSource = () => nonce,
+            Sleep = (_, _) => Task.CompletedTask,
+        });
+        AssertSameBytes(Fixtures.Read("output", name + ".pdf"), done.Pdf, name);
+        Assert.Equal(Str(exp, "outSha256"), done.OutSha256);
+        Assert.Equal(JsonSerializer.Deserialize<Placement>(exp.GetProperty("placement").GetRawText()), done.Placement);
     }
 
     /// <summary>expect.suggestion (Go pades.Suggestion JSON) ↔ PlacementSuggestion, field-for-field (numbers as JSON numbers).</summary>

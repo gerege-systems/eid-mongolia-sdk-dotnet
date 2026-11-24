@@ -318,11 +318,11 @@ public class PlacementTests
         return Occupancy.Scan(page, new long[] { 0, 0, 61200, 79200 });
     }
 
-    private static byte[] Stream(string dict, byte[] data) =>
+    internal static byte[] Stream(string dict, byte[] data) =>
         L($"<< {dict} /Length {data.Length} >>\nstream\n").Concat(data).Concat(L("\nendstream")).ToArray();
 
     /// <summary>Go fxPDF — a minimal classic-xref PDF: objs[0] is object 1 (the Catalog).</summary>
-    private static byte[] Pdf(params object[] objs)
+    internal static byte[] Pdf(params object[] objs)
     {
         var b = new MemoryStream();
         void W(string s) => b.Write(L(s));
