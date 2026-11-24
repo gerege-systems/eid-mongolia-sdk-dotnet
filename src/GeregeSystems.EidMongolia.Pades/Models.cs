@@ -11,7 +11,11 @@ namespace GeregeSystems.EidMongolia.Pades;
 /// <summary><see cref="EidPades.Prepare"/>-ийн сонголт (Go <c>pades.PrepareOptions</c>-тэй 1:1).</summary>
 public sealed record PrepareOptions
 {
-    /// <summary>Иргэний SIGN гэрчилгээний DER (signingCertificateV2-д). Заавал.</summary>
+    /// <summary>
+    /// Иргэний SIGN гэрчилгээний DER (signingCertificateV2-д). Заавал. Харагдах дүрслэлийн хувилбарыг зөвхөн энэ гэрчилгээ
+    /// сонгоно (APPEARANCE_SPEC.md §6.1): e-Seal гэрчилгээ (CA биш, keyUsage nonRepudiation тавигдсан ба digitalSignature
+    /// тавигдаагүй, EKU-ийн зорилгогүй) → байгууллагын тамганы дардас (QR/URL/үүрэггүй, docId шаардахгүй); бусад → иргэний дардас.
+    /// </summary>
     public byte[] SignerCert { get; init; } = Array.Empty<byte>();
 
     /// <summary>Олгогч гинж DER (04, 03, 02). <c>null</c> = шигтгэсэн eID гинжээс SignerCert-ийн олгогчоор бүтээнэ.</summary>
@@ -56,7 +60,7 @@ public sealed record PrepareOptions
 /// <summary>
 /// Харагдах гарын үсгийн байршил (Go <c>pades.Appearance</c>, APPEARANCE_SPEC.md §1). Координат нь pt, тухайн хуудасны
 /// CropBox (байхгүй бол MediaBox)-ийн /Rotate-ийн ДАРААХ (дэлгэцэнд харагдах) зүүн доод булангаас; X баруун тийш, Y дээш.
-/// Утга бүр 0.01 pt хүртэл тойрогдоно. Өндөр ≥ 45 pt (QR), бичвэр багтахгүй бол REQUEST_INVALID.
+/// Утга бүр 0.01 pt хүртэл тойрогдоно. Өндөр ≥ 45 pt (QR; QR-гүй тамганы дардасд ≥ 29.25 pt), бичвэр багтахгүй бол REQUEST_INVALID.
 /// </summary>
 public sealed record Appearance
 {
@@ -312,4 +316,10 @@ public sealed record Completed
     /// <see cref="EidPades.Registration"/>-д <see cref="RegistrationOptions.OnBehalfOf"/> заавал.
     /// </summary>
     public string ClaimedRole { get; init; } = "";
+
+    /// <summary>
+    /// Харагдах тамганы дардасны эцсийн байршил — зөвхөн <see cref="EidPades.SealAsync"/> бөглөнө; үл харагдах тамгад (мөн
+    /// <see cref="EidPades.CompleteAsync"/>-д) <c>null</c>. Иргэний урсгалд <see cref="PreparedDocument.Placement"/>.
+    /// </summary>
+    public Placement? Placement { get; init; }
 }

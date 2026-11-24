@@ -19,11 +19,16 @@ internal sealed class AppearanceException : Exception
 /// SignatureRevision.Prepare-ийн харагдах оролт: байршил (харагдах хуудасны орон зайд, h100) ба бичвэр. Page — 1-ээс,
 /// шийдэгдсэн (0 биш); Date — «YYYY-MM-DD HH:MM (+08)»; Url — https://ca.eidmongolia.mn/verify/&lt;docID&gt;/&lt;revIndex&gt;;
 /// Exact — <c>appearance.exact</c> (PLACEMENT_SPEC.md §6a): never moved, the scan only sets the status.
+/// Seal — байгууллагын тамганы дардас (APPEARANCE_SPEC.md §6): гарын үсэг зурагчийн гэрчилгээ e-Seal үед л (§6.1).
 /// </summary>
-internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false);
+internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false,
+    bool Seal = false);
 
-/// <summary>W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270.</summary>
-internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url);
+/// <summary>
+/// W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270. Seal — тамганы дардас
+/// (APPEARANCE_SPEC.md §6): QR/URL/үүрэг үгүй, SealLabels; Role, Url үл тооно.
+/// </summary>
+internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url, bool Seal = false);
 
 internal static class SignatureAppearance
 {
@@ -37,6 +42,13 @@ internal static class SignatureAppearance
     {
         ["mn"] = "eID Mongolia-аар зурсан",
         ["en"] = "Signed with eID Mongolia",
+    };
+
+    /// <summary>Тамганы дардасны 2 дахь мөр (APPEARANCE_SPEC.md §6.2).</summary>
+    private static readonly Dictionary<string, string> SealLabels = new(StringComparer.Ordinal)
+    {
+        ["mn"] = "eID Mongolia-аар тамгалсан",
+        ["en"] = "Sealed with eID Mongolia",
     };
 
     /// <summary>pt → h100: floor(v × 100 + 0.5).</summary>
@@ -72,6 +84,7 @@ internal static class SignatureAppearance
     /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3).</summary>
     public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld)
     {
+        if (p.Seal) return SealContent(p, reg, bld);
         if (!Labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
         if (!VerifyPage.AsciiUrl(p.Url)) throw new AppearanceException("URL ASCII биш");
         if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
@@ -133,6 +146,43 @@ internal static class SignatureAppearance
         }
         if (cm != "") w.Op("Q");
         w.Op("EMC");
+        return Latin1.ToBytes(w.Ops.ToString());
+    }
+
+    /// <summary>
+    /// Go sealContent — байгууллагын тамганы дардасны content stream (APPEARANCE_SPEC.md §6.2): иргэний дардастай ижил хүрээ,
+    /// фонт, мөрийн дүрэм; QR, /EIDVerify BDC, үүрэг үгүй; бичвэр pad-аас эхэлж бүтэн өргөнийг (W − 2·pad) эзэлнэ.
+    /// </summary>
+    private static byte[] SealContent(AppearanceParams p, PageFont reg, PageFont bld)
+    {
+        if (!SealLabels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
+        if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
+        p = p with { Role = "" };
+        long tw = p.W - 2 * Pad;
+        var w = new VerifyPage.Writer(reg, bld);
+        List<Line>? lines = null;
+        for (int f = MaxSize; f >= MinSize && lines is null && tw > 0; f--) lines = Layout(w, p, label, f, tw);
+        if (lines is null) throw new AppearanceException("хэт жижиг (бичвэр багтахгүй)");
+        long total = 0;
+        foreach (var l in lines) total += l.Size * Leading;
+        var (cm, _, _) = Rotation(p.Rotate, p.W, p.H);
+        if (cm != "")
+        {
+            w.Op("q");
+            w.Op(cm);
+        }
+        w.Op(VerifyPage.ColOk + " RG");
+        w.Op("1 w");
+        w.Op("0.5 0.5 " + Num100(p.W - 100) + " " + Num100(p.H - 100) + " re S");
+        long cursor = p.H - Pad - (p.H - 2 * Pad - total) / 2;
+        foreach (var l in lines)
+        {
+            cursor -= l.Size * Leading;
+            w.Op(l.Color + " rg");
+            w.Op(string.Create(CultureInfo.InvariantCulture,
+                $"BT /F{l.Font} {l.Size} Tf {Num100(Pad)} {Num100(cursor + l.Size * Descent)} Td {w.GlyphHex(l.Font, l.Text)} Tj ET"));
+        }
+        if (cm != "") w.Op("Q");
         return Latin1.ToBytes(w.Ops.ToString());
     }
 

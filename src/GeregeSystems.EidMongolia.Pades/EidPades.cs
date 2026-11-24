@@ -129,7 +129,8 @@ public static partial class EidPades
         }
         var name = options.SignerName;
         if (string.IsNullOrWhiteSpace(name) || GoText.TrimSpace(name) == "") name = SignerDisplayName(cert);
-        var vis = options.Appearance is null ? null : VisibleSpec(pdf, options, name, now, docId, revIndex);
+        // APPEARANCE_SPEC.md §6.1: e-Seal гэрчилгээ → байгууллагын тамганы дардас; бусад нь иргэний дардас (өмнөхтэй байт-ижил).
+        var vis = options.Appearance is null ? null : VisibleSpec(pdf, options, name, now, docId, revIndex, IsSealCertificate(cert));
         PreparedRevision prep;
         try
         {
@@ -426,11 +427,14 @@ public static partial class EidPades
         return true;
     }
 
-    /// <summary>Go visibleSpec: хуудас (0 → eID verify биш сүүлийн, PLACEMENT_SPEC §1a), h100, хэл, огноо (+08), verify URL.</summary>
-    private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex)
+    /// <summary>
+    /// Go visibleSpec: хуудас (0 → eID verify биш сүүлийн, PLACEMENT_SPEC §1a), h100, хэл, огноо (+08), verify URL. seal (гарын
+    /// үсэг зурагчийн гэрчилгээ e-Seal) бол тамганы дардас (APPEARANCE_SPEC.md §6): URL/QR үгүй тул docId шаардахгүй.
+    /// </summary>
+    private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex, bool seal)
     {
         var a = o.Appearance!;
-        if (docId == "") throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас алга)");
+        if (docId == "" && !seal) throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас алга)");
         // page 0 / байхгүй = eID verify хуудас БИШ сүүлийн хуудас (PLACEMENT_SPEC §1a); тодорхой дугаар хэвээр.
         int n, last;
         try
@@ -448,7 +452,7 @@ public static partial class EidPades
         return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(a.Width),
             SignatureAppearance.Round100(a.Height), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
             now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " (+08)",
-            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact);
+            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact, seal);
     }
 
     /// <summary>DTBS дээрх гарын үсгийг шалгаж CMS-д бичих хэлбэрээр (RSA хэвээр, ECDSA DER) буцаана; таарахгүй бол null.</summary>
