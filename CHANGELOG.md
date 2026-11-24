@@ -2,6 +2,50 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.16.0 — 2026-11-24
+
+**Гол өөрчлөлт:** `SealAsync` одоо анхдагчаар **харагдах байгууллагын тамганы дардас** зурна; `SealOptions.Invisible = true`
+өмнөх гаралтыг (байт-ижил) сэргээнэ. Go SDK v0.30.0 / TS SDK 0.48.0-аас өмнөх шалгагчид харагдах тамганы дардастай PDF-ийн
+өмнөх гарын үсгүүдийг өөрчлөгдсөн (modified) гэж мэдээлнэ; eID Mongolia CA-ийн шалгагч ба түүний /verify хуудас үүнийг
+аль хэдийн дэмждэг. Тамганы гэрчилгээний шалгалт одоо специйн дүрмийг дагана: хоосон extendedKeyUsage-ийг хүлээн авна, CA
+гэрчилгээг татгалзана.
+
+*English:* `SealAsync` now draws a visible organisation seal stamp by default (`Invisible = true` restores the previous
+output). Verifiers older than Go SDK v0.30.0 / TS SDK 0.48.0 report earlier signatures as modified on a PDF that received a
+visible seal stamp; the eID Mongolia CA validator and its /verify page already support it. The seal-certificate gate now
+follows the spec rule: an empty extendedKeyUsage is accepted, a CA certificate is rejected.
+
+### Added — харагдах байгууллагын тамганы дардас (APPEARANCE_SPEC.md §6, golden v12); `SealAsync` анхдагчаар харагдана
+
+- **Юу:** дардас бичигч гарын үсэг зурагчийн гэрчилгээгээр хувилбараа сонгоно (§6.1, `EidPades.IsSealCertificate`, internal):
+  e-Seal гэрчилгээ (CA биш, keyUsage bit 1 тавигдсан ба bit 0 тавигдаагүй — бусад бит үл тооно, EKU-ийн зорилгогүй —
+  extendedKeyUsage алга эсвэл хоосон) → **тамганы дардас**: иргэний дардастай ижил widget, 11 объект, F1/F2 фонт, form
+  dictionary, байршил; `/EIDVerify` BDC, QR, URL, үүргийн мөр үгүй; бичвэр x = 4 pt-ээс, өргөн W − 8 pt; мөр: нэр (F2,
+  11 → 7, ≤ 2 мөр), «eID Mongolia-аар тамгалсан» / "Sealed with eID Mongolia" (F1, f − 2, ногоон), огноо (F1, f − 2, саарал).
+  Тамганы дардасд docId шаардахгүй. Бусад гэрчилгээ → иргэний дардас, байт өөрчлөгдөөгүй.
+  `SealOptions.Appearance` (иргэний `Appearance`-тэй ижил талбар) ба `SealOptions.Invisible` нэмэгдсэн; `Completed.Placement`
+  (зөвхөн `SealAsync` бөглөнө); `EidPades.SealStampWidth/Height/Margin` (220, 64, 36). **Анхдагч өөрчлөгдсөн:** аль нь ч
+  өгөөгүй бол `SealAsync` дардсыг харуулна — сүүлийн (eID verify биш) хуудас, 220 × 64 pt, x = хуудасны өргөн − 256, y = 36,
+  жижиг хуудсанд багтаасан (§6.4), Exact биш (PLACEMENT_SPEC-ээр агуулгаас зайлсхийнэ). Автомат дардас багтахгүй
+  (`REQUEST_INVALID`) эсвэл гаралт хэмжээнээс хэтрэх (`PDF_TOO_LARGE`) бол үл харагдах тамга (`Placement = null`); өгсөн
+  `Appearance` бол алдаа хэвээр. `Invisible = true` — өмнөх гаралттай байт-ижил. Тамгалагчийн (delegate) алдаа ба цуцлалт
+  үл харагдах тамга руу шилжихгүй — өөрчлөгдөхгүй дамжина.
+- **Анхаар:** Go SDK v0.30.0 / TS SDK 0.48.0-аас өмнөх шалгагчид харагдах тамганы дардастай PDF-ийн өмнөх гарын үсгүүдийг
+  өөрчлөгдсөн (modified) гэж мэдээлнэ — тэдгээр шинэчлэгдэх хүртэл `Invisible = true`.
+- **Гэрчилгээний шалгалт:** `SealAsync`-ийн `SIGNER_INVALID` шалгалт мөн §6.1 (Go `eid.IsSealCertificate`) болсон: хоосон
+  extendedKeyUsage-тэй гэрчилгээг хүлээн авна (өмнө нь татгалздаг), CA гэрчилгээг татгалзана (өмнө нь шалгадаггүй).
+  keyUsage/basicConstraints/EKU-г .NET-ийн декодероор биш DER-ээс шууд уншина; алдааны мессеж дүрмийг бүтнээр нь нэрлэнэ.
+- **Яагаад:** Go SDK v0.30.0 (`SealPDF`) ба TS SDK 0.48.0 (`sealPdf`)-тэй ижил API, ижил байт.
+- **Хаана:** `src/…/Pdf/SignatureAppearance.cs` (`SealContent`), `Pdf/SignatureRevision.cs`, `EidPades.cs` (`VisibleSpec`),
+  `Seal.cs`, `Models.cs`; `build/go-sdk.ref` = d762ed8 (Go v0.30.0) + `testdata/golden` (pades-golden-v12: `seal-visible`,
+  `seal-visible-en`, `seal-visible-third`, `pki/seal.pem`); README.
+- **Шалгасан:** PR #40-ийн CI (Windows + Linux). `GoldenTests` — v12-ийн 3 тохиолдол Prepare/CompleteAsync-аар ба
+  `SealAsync`-аар (автомат ба тодорхой байршил) бүхэлдээ байт-ижил, placement; бусад golden өөрчлөгдөөгүй.
+  `SealTests` — §6.1 дүрэм (хоосон EKU = тамга, танихгүй/таньдаг EKU, CA, digitalSignature, keyUsage bit 32), 164 pt баримт
+  → 156 × 64, x = 4; багтахгүй хуудас ба хэмжээний хязгаарын үл харагдах нөөц (DTBS = өмнөх `SealAsync`); `Invisible` DTBS =
+  өмнөх `SealAsync`; delegate-ийн алдаа ба цуцлалт нөөц болохгүй.
+- **Үлдсэн:** энэ SDK-д validator байхгүй тул §6.3 (дардсыг сэргээж тулгах) хэрэгжээгүй.
+
 ## 0.15.2 — 2026-11-16
 
 ### Changed — LTV: цуцлалтын эх сурвалжийн дараалал гэрчилгээний үүргээр (CA — CRL эхэлж, навч — OCSP эхэлж)
