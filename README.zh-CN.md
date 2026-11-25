@@ -34,36 +34,36 @@ dotnet add package GeregeSystems.EidMongolia.Pades --version 0.16.0
 using System.Text.Json;
 using GeregeSystems.EidMongolia.Pades;
 
-// 1. Бэлдэх — сүлжээгүй. SignerCert = иргэний SIGN гэрчилгээ (CA-ийн сессийн хариунаас, DER).
+// 1. 准备——无需网络。SignerCert = 公民的 SIGN 证书（来自 CA 的 session 响应，DER 格式）。
 var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
 {
     SignerCert = signCertDer,
-    Reason = "Гэрээ баталгаажуулав",
-    ClaimedRole = representation.ClaimedRole, // байгууллагын нэрийн өмнөөс бол (CA-ийн representation хариунаас)
-    VerifyPage = true,                         // шалгах (QR) хуудас — зөвхөн эхний eID гарын үсэгт
-    // VerifyPagePosition = "first",           // 0.8.0+: QR хуудас 1-р хуудас болно (анхдагч "last"); Appearance.Page,
-                                               // SuggestPlacement, Placement.Page оролтын PDF-ийн хуудсаар (PAGE_SPEC §8a)
-    FileName = "Гэрээ №1.pdf",
-    Lang = "mn",                               // mn (анхдагч) | en
-    // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = eID verify
-    // хуудас биш сүүлийн хуудас (PLACEMENT_SPEC §1a). Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
+    Reason = "合同已确认",
+    ClaimedRole = representation.ClaimedRole, // 以组织名义签名时使用（来自 CA 的 representation 响应）
+    VerifyPage = true,                         // 验证（QR）页——仅用于第一个 eID 签名
+    // VerifyPagePosition = "first",           // 0.8.0+：QR 页成为第 1 页（默认 "last"）；Appearance.Page、
+                                               // SuggestPlacement、Placement.Page 按输入 PDF 的页码计算（PAGE_SPEC §8a）
+    FileName = "合同第1号.pdf",
+    Lang = "mn",                               // mn（默认）| en
+    // 可选的可见签名（APPEARANCE_SPEC.md）：单位 pt，自页面可见的左下角起算；Page 0 = 最后一页，
+    // 而不是 eID verify 页（PLACEMENT_SPEC §1a）。高度 ≥ 45 pt；放不下则为 REQUEST_INVALID。null = 不可见。
     Appearance = new Appearance { X = 36, Y = 36, Width = 220, Height = 64 },
 });
-// prepared.Placement — харагдах гарын үсгийн эцсийн байрлал (доорх «Байршил»).
+// prepared.Placement——可见签名的最终位置（见下文“位置”）。
 
-// 2. prepared.Dtbs (32 байт)-ийг RP backend-ээр CA-ийн signature session-д өгч утсаар зуруулна
-//    (RAW_DIGEST_SIGNATURE), эсвэл USB токеноор (PKCS#11) локалд зурна. prepared.State-г хүлээх хооронд хадгалж болно
-//    (формат нь Go reference-тэй ижил).
+// 2. 通过 RP 后端将 prepared.Dtbs（32 字节）交给 CA 的 signature session，由手机签名
+//    （RAW_DIGEST_SIGNATURE），或在本地使用 USB 令牌（PKCS#11）签名。等待期间可以保存 prepared.State
+//    （格式与 Go reference 相同）。
 
-// 3. Суулгах — TSA, OCSP/CRL сүлжээ. Гарын үсэг: RSA PKCS#1 v1.5, ECDSA r‖s эсвэл DER — гэрчилгээгээр автоматаар.
+// 3. 嵌入——使用 TSA、OCSP/CRL 网络。签名：RSA PKCS#1 v1.5、ECDSA r‖s 或 DER——根据证书自动识别。
 Completed done = await EidPades.CompleteAsync(prepared.State, signature, cancellationToken: ct);
 File.WriteAllBytes("signed.pdf", done.Pdf);
 
-// 4. Бүртгэх — CA POST /pdf/signatures-ийн бие (PDF биш, зөвхөн мета). JSON-оор шууд илгээж болно:
+// 4. 登记——CA 的 POST /pdf/signatures 请求体（不是 PDF，仅为元数据）。可直接以 JSON 发送：
 SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions
 {
-    SessionId = sessionId,                     // утсанд заавал; токенд өгөхгүй (Medium = token)
-    OnBehalfOf = orgRegNo,                     // NTRMN-… — ClaimedRole өгсөн бол заавал
+    SessionId = sessionId,                     // 手机必须提供；令牌则不提供（Medium = token）
+    OnBehalfOf = orgRegNo,                     // NTRMN-…——提供 ClaimedRole 时必须填写
 });
 string body = JsonSerializer.Serialize(reg);
 ```
@@ -130,8 +130,8 @@ string body = JsonSerializer.Serialize(reg);
 
 ```csharp
 var s = EidPades.SuggestPlacement(pdf, new Appearance { X = 340, Y = 36, Width = 220, Height = 64 });
-// s.Page, s.X, s.Y, s.Width, s.Height, s.Status — Prepare-ийн Placement-тэй ижил; s.PageWidth/PageHeight,
-// s.PageCount, s.Pages[i].Width/Height (pt). UI (дээд-зүүн эх, s px/pt): left = X·s, top = (PageHeight − Y − Height)·s.
+// s.Page, s.X, s.Y, s.Width, s.Height, s.Status — 与 Prepare 的 Placement 相同; s.PageWidth/PageHeight,
+// s.PageCount, s.Pages[i].Width/Height (pt). UI（原点在左上角，s px/pt）: left = X·s, top = (PageHeight − Y − Height)·s.
 var prepared = EidPades.Prepare(pdf, opts with
 {
     Appearance = new Appearance { Page = s.Page, X = x, Y = y, Width = s.Width, Height = s.Height, Exact = true },
@@ -188,7 +188,7 @@ using GeregeSystems.EidMongolia.Pades;
 Completed done = await EidPades.SealAsync(pdfBytes, new SealOptions
 {
     SealCert = Convert.FromBase64String(sealCertB64),
-    Reason = "Байгууллагын тамга",            // SignerName = гэрчилгээний CN (байгууллагын нэр), Chain = шигтгэсэн eID гинж
+    Reason = "组织印章",            // SignerName = 证书的 CN（组织名称），Chain = 内置的 eID 证书链
 }, async (dtbs, ct) =>
 {
     using var req = new HttpRequestMessage(HttpMethod.Post, $"https://rp.eidmongolia.mn/seal/{orgEtsi}")
@@ -197,7 +197,7 @@ Completed done = await EidPades.SealAsync(pdfBytes, new SealOptions
     };
     req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rpSecret);
     using var resp = await http.SendAsync(req, ct);
-    resp.EnsureSuccessStatusCode();                    // 403 = SEAL:<orgEtsi> эрхгүй; 429 = түр хязгаарлагдсан
+    resp.EnsureSuccessStatusCode();                    // 403 = 没有 SEAL:<orgEtsi> 权限；429 = 暂时被限流
     using var body = JsonDocument.Parse(await resp.Content.ReadAsStreamAsync(ct));
     return Convert.FromBase64String(body.RootElement.GetProperty("signature").GetProperty("value").GetString()!);
 }, cancellationToken: ct);
@@ -223,19 +223,19 @@ RP 取得公民的“我的信息”（App 中保存的 dict 原样不变 + 人�
 ```csharp
 using GeregeSystems.EidMongolia.Qr;
 
-using var qr = new EidQrClient(new EidQrOptions { RpUuid = rpUuid, RpName = "Касс 3", ApiSecret = secret });
+using var qr = new EidQrClient(new EidQrOptions { RpUuid = rpUuid, RpName = "收银台 3", ApiSecret = secret });
 try
 {
-    QrSession s = await qr.StartAsync(new QrStartRequest(scanned)); // nonce өгөөгүй бол SDK 22 тэмдэгт үүсгэнэ
-    QrResult r = await qr.ResultAsync(s);                            // эсвэл polling UI-д: CheckAsync(s) → QrCheck
-    foreach (var (key, value) in r.Data) Show(key, value);          // payload-ийн дарааллаар, түлхүүр яг хэвээр
+    QrSession s = await qr.StartAsync(new QrStartRequest(scanned)); // 若未提供 nonce，SDK 会生成 22 个字符
+    QrResult r = await qr.ResultAsync(s);                            // 或用于轮询 UI：CheckAsync(s) → QrCheck
+    foreach (var (key, value) in r.Data) Show(key, value);          // 按 payload 的顺序，键保持原样
     // r.Source (dan, passport, citizenid …), r.Photo (JPEG | null), r.Signer.Etsi / GivenName / Surname,
-    // r.SignedAt, r.Sha256 (= CA аудитын qrsha), r.Jws (маргаанд хадгалж болно)
+    // r.SignedAt, r.Sha256 (= CA 审计中的 qrsha), r.Jws (可保留用于争议)
 }
-catch (EidQrException e) when (e.Code == EidQrErrorCodes.TokenInvalid) { /* 404 — шинэ QR гаргуул */ }
+catch (EidQrException e) when (e.Code == EidQrErrorCodes.TokenInvalid) { /* 404——请重新生成 QR */ }
 catch (EidQrException e) when (e.Code == EidQrErrorCodes.SessionFailed) { /* e.EndResult: USER_REFUSED, TIMEOUT */ }
-catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationGone) { /* 410 — дахин QR уншуул */ }
-catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal)) { /* шалгалт унасан — ИТГЭХГҮЙ */ }
+catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationGone) { /* 410——请重新扫描 QR */ }
+catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal)) { /* 检查失败——不要信任 */ }
 ```
 
 `EidQr.VerifyAsync(jws, new QrExpect(rpUuid, sessionId, nonce), trust?)`——重新验证已保存的 JWS（网络仅用于 OCSP）。
