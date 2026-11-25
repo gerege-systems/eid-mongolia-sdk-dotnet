@@ -34,36 +34,36 @@ The `.nupkg` of each release is also available on [GitHub Releases](https://gith
 using System.Text.Json;
 using GeregeSystems.EidMongolia.Pades;
 
-// 1. Бэлдэх — сүлжээгүй. SignerCert = иргэний SIGN гэрчилгээ (CA-ийн сессийн хариунаас, DER).
+// 1. Prepare — no network. SignerCert = the citizen's SIGN certificate (from the CA's session response, DER).
 var prepared = EidPades.Prepare(pdfBytes, new PrepareOptions
 {
     SignerCert = signCertDer,
-    Reason = "Гэрээ баталгаажуулав",
-    ClaimedRole = representation.ClaimedRole, // байгууллагын нэрийн өмнөөс бол (CA-ийн representation хариунаас)
-    VerifyPage = true,                         // шалгах (QR) хуудас — зөвхөн эхний eID гарын үсэгт
-    // VerifyPagePosition = "first",           // 0.8.0+: QR хуудас 1-р хуудас болно (анхдагч "last"); Appearance.Page,
-                                               // SuggestPlacement, Placement.Page оролтын PDF-ийн хуудсаар (PAGE_SPEC §8a)
-    FileName = "Гэрээ №1.pdf",
-    Lang = "mn",                               // mn (анхдагч) | en
-    // Сонголттой харагдах гарын үсэг (APPEARANCE_SPEC.md): pt, хуудасны харагдах зүүн доод булангаас; Page 0 = eID verify
-    // хуудас биш сүүлийн хуудас (PLACEMENT_SPEC §1a). Өндөр ≥ 45 pt; багтахгүй бол REQUEST_INVALID. null = үл харагдах.
+    Reason = "Contract confirmed",
+    ClaimedRole = representation.ClaimedRole, // when signing on behalf of an organization (from the CA's representation response)
+    VerifyPage = true,                         // the verification (QR) page — only for the first eID signature
+    // VerifyPagePosition = "first",           // 0.8.0+: the QR page becomes page 1 (default "last"); Appearance.Page,
+                                               // SuggestPlacement and Placement.Page count by the input PDF's pages (PAGE_SPEC §8a)
+    FileName = "Contract No. 1.pdf",
+    Lang = "mn",                               // mn (default) | en
+    // Optional visible signature (APPEARANCE_SPEC.md): pt, from the visible bottom-left corner of the page; Page 0 = the last page,
+    // NOT the eID verify page (PLACEMENT_SPEC §1a). Height ≥ 45 pt; REQUEST_INVALID if it does not fit. null = invisible.
     Appearance = new Appearance { X = 36, Y = 36, Width = 220, Height = 64 },
 });
-// prepared.Placement — харагдах гарын үсгийн эцсийн байрлал (доорх «Байршил»).
+// prepared.Placement — the final placement of the visible signature (see "Placement" below).
 
-// 2. prepared.Dtbs (32 байт)-ийг RP backend-ээр CA-ийн signature session-д өгч утсаар зуруулна
-//    (RAW_DIGEST_SIGNATURE), эсвэл USB токеноор (PKCS#11) локалд зурна. prepared.State-г хүлээх хооронд хадгалж болно
-//    (формат нь Go reference-тэй ижил).
+// 2. Give prepared.Dtbs (32 bytes), via the RP backend, to the CA's signature session so it is signed on the phone
+//    (RAW_DIGEST_SIGNATURE), or sign locally with a USB token (PKCS#11). prepared.State may be stored while waiting
+//    (its format is identical to the Go reference).
 
-// 3. Суулгах — TSA, OCSP/CRL сүлжээ. Гарын үсэг: RSA PKCS#1 v1.5, ECDSA r‖s эсвэл DER — гэрчилгээгээр автоматаар.
+// 3. Embed — TSA, OCSP/CRL network. Signature: RSA PKCS#1 v1.5, ECDSA r‖s or DER — detected automatically from the certificate.
 Completed done = await EidPades.CompleteAsync(prepared.State, signature, cancellationToken: ct);
 File.WriteAllBytes("signed.pdf", done.Pdf);
 
-// 4. Бүртгэх — CA POST /pdf/signatures-ийн бие (PDF биш, зөвхөн мета). JSON-оор шууд илгээж болно:
+// 4. Register — the body of the CA's POST /pdf/signatures (not the PDF, metadata only). It can be sent directly as JSON:
 SignatureRegistration reg = EidPades.Registration(done, new RegistrationOptions
 {
-    SessionId = sessionId,                     // утсанд заавал; токенд өгөхгүй (Medium = token)
-    OnBehalfOf = orgRegNo,                     // NTRMN-… — ClaimedRole өгсөн бол заавал
+    SessionId = sessionId,                     // required for a phone; omit for a token (Medium = token)
+    OnBehalfOf = orgRegNo,                     // NTRMN-… — required if ClaimedRole is given
 });
 string body = JsonSerializer.Serialize(reg);
 ```
@@ -130,8 +130,8 @@ preview, calling Prepare with `Appearance.Exact = true` draws the stamp exactly 
 
 ```csharp
 var s = EidPades.SuggestPlacement(pdf, new Appearance { X = 340, Y = 36, Width = 220, Height = 64 });
-// s.Page, s.X, s.Y, s.Width, s.Height, s.Status — Prepare-ийн Placement-тэй ижил; s.PageWidth/PageHeight,
-// s.PageCount, s.Pages[i].Width/Height (pt). UI (дээд-зүүн эх, s px/pt): left = X·s, top = (PageHeight − Y − Height)·s.
+// s.Page, s.X, s.Y, s.Width, s.Height, s.Status — the same as Prepare's Placement; s.PageWidth/PageHeight,
+// s.PageCount, s.Pages[i].Width/Height (pt). UI (top-left origin, s px/pt): left = X·s, top = (PageHeight − Y − Height)·s.
 var prepared = EidPades.Prepare(pdf, opts with
 {
     Appearance = new Appearance { Page = s.Page, X = x, Y = y, Width = s.Width, Height = s.Height, Exact = true },
@@ -188,7 +188,7 @@ using GeregeSystems.EidMongolia.Pades;
 Completed done = await EidPades.SealAsync(pdfBytes, new SealOptions
 {
     SealCert = Convert.FromBase64String(sealCertB64),
-    Reason = "Байгууллагын тамга",            // SignerName = гэрчилгээний CN (байгууллагын нэр), Chain = шигтгэсэн eID гинж
+    Reason = "Organization seal",            // SignerName = the certificate's CN (the organization's name), Chain = the embedded eID chain
 }, async (dtbs, ct) =>
 {
     using var req = new HttpRequestMessage(HttpMethod.Post, $"https://rp.eidmongolia.mn/seal/{orgEtsi}")
@@ -197,7 +197,7 @@ Completed done = await EidPades.SealAsync(pdfBytes, new SealOptions
     };
     req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rpSecret);
     using var resp = await http.SendAsync(req, ct);
-    resp.EnsureSuccessStatusCode();                    // 403 = SEAL:<orgEtsi> эрхгүй; 429 = түр хязгаарлагдсан
+    resp.EnsureSuccessStatusCode();                    // 403 = no SEAL:<orgEtsi> permission; 429 = temporarily rate-limited
     using var body = JsonDocument.Parse(await resp.Content.ReadAsStreamAsync(ct));
     return Convert.FromBase64String(body.RootElement.GetProperty("signature").GetProperty("value").GetString()!);
 }, cancellationToken: ct);
@@ -223,19 +223,19 @@ store the value; the presentation can be read only once (a second read returns 4
 ```csharp
 using GeregeSystems.EidMongolia.Qr;
 
-using var qr = new EidQrClient(new EidQrOptions { RpUuid = rpUuid, RpName = "Касс 3", ApiSecret = secret });
+using var qr = new EidQrClient(new EidQrOptions { RpUuid = rpUuid, RpName = "Till 3", ApiSecret = secret });
 try
 {
-    QrSession s = await qr.StartAsync(new QrStartRequest(scanned)); // nonce өгөөгүй бол SDK 22 тэмдэгт үүсгэнэ
-    QrResult r = await qr.ResultAsync(s);                            // эсвэл polling UI-д: CheckAsync(s) → QrCheck
-    foreach (var (key, value) in r.Data) Show(key, value);          // payload-ийн дарааллаар, түлхүүр яг хэвээр
+    QrSession s = await qr.StartAsync(new QrStartRequest(scanned)); // if no nonce is given, the SDK generates 22 characters
+    QrResult r = await qr.ResultAsync(s);                            // or for a polling UI: CheckAsync(s) → QrCheck
+    foreach (var (key, value) in r.Data) Show(key, value);          // in payload order, keys exactly as they are
     // r.Source (dan, passport, citizenid …), r.Photo (JPEG | null), r.Signer.Etsi / GivenName / Surname,
-    // r.SignedAt, r.Sha256 (= CA аудитын qrsha), r.Jws (маргаанд хадгалж болно)
+    // r.SignedAt, r.Sha256 (= the CA's audit qrsha), r.Jws (can be kept for a dispute)
 }
-catch (EidQrException e) when (e.Code == EidQrErrorCodes.TokenInvalid) { /* 404 — шинэ QR гаргуул */ }
+catch (EidQrException e) when (e.Code == EidQrErrorCodes.TokenInvalid) { /* 404 — ask for a new QR */ }
 catch (EidQrException e) when (e.Code == EidQrErrorCodes.SessionFailed) { /* e.EndResult: USER_REFUSED, TIMEOUT */ }
-catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationGone) { /* 410 — дахин QR уншуул */ }
-catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal)) { /* шалгалт унасан — ИТГЭХГҮЙ */ }
+catch (EidQrException e) when (e.Code == EidQrErrorCodes.PresentationGone) { /* 410 — scan the QR again */ }
+catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal)) { /* a check failed — DO NOT TRUST */ }
 ```
 
 `EidQr.VerifyAsync(jws, new QrExpect(rpUuid, sessionId, nonce), trust?)` — re-verifies a stored JWS (network only for OCSP).
