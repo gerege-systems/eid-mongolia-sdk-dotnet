@@ -1,3 +1,5 @@
+Монгол · [English](README.en.md) · [中文](README.zh-CN.md)
+
 # eid-mongolia-sdk-dotnet
 
 **eID Mongolia** client-side PAdES — .NET (C#) SDK. PDF баримт eID сервер рүү **хэзээ ч явахгүй** (Smart-ID загвар):
@@ -16,7 +18,7 @@ xref, CMS, TSA/OCSP/CRL хүсэлт, DSS) **байт-ижил** гаргадг�
 - Бүрэн шалгагч (validator) энд **байхгүй** — шалгалт: файлын SHA-256-аар CA-ийн бүртгэлээс, бүрэн криптограф шалгалт Go
   backend SDK-д.
 
-[English summary](#english)
+English: [README.en.md](README.en.md) · 中文: [README.zh-CN.md](README.zh-CN.md)
 
 ## Суулгах
 
@@ -287,56 +289,3 @@ catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal
 
 MIT — [LICENSE](LICENSE). Гуравдагч: Noto Sans (OFL 1.1), digitorus/pdf (BSD-3), digitorus/pdfsign (BSD-2) — NuGet багцын
 `licenses/`.
-
----
-
-## English
-
-**Organization e-Seal:** `EidPades.SealAsync(pdf, new SealOptions { SealCert = … }, sealDigest)` prepares a signature
-(no verify page) with the organization's seal certificate (not a CA, keyUsage nonRepudiation without digitalSignature, no
-EKU purpose — else `SIGNER_INVALID`), calls your delegate with the 32-byte DTBS (your own `HttpClient` → CA
-`POST /seal/{orgEtsi}` `{digest, hashType: "SHA256"}`, return the decoded `signature.value`), then completes to
-PAdES-BASELINE-LT (timestamp mandatory). **By default the seal is visible** (as Go `SealPDF` / TS `sealPdf`,
-APPEARANCE_SPEC.md §6): an organisation seal stamp (name, "Sealed with eID Mongolia" / «eID Mongolia-аар тамгалсан», date;
-no QR, link or role) on the last page that is not an eID verify page, 220 × 64 pt at `x = pageWidth − 256`, `y = 36`
-(fitted to small pages), moved off existing content; the result is `done.Placement`. When the automatic stamp does not
-fit the page or would push the output over 10 MiB, the seal is written invisible instead (`Placement = null`).
-`SealOptions.Appearance` positions it yourself (same fields as the citizen `Appearance`; `REQUEST_INVALID` /
-`PDF_TOO_LARGE` when it cannot be drawn); `SealOptions.Invisible = true` restores the previous, byte-identical invisible
-seal. Verifiers older than Go SDK v0.30.0 / TS SDK 0.48.0 report earlier signatures as modified on a PDF that received a
-visible seal stamp. Needs the RP permission `SEAL:<orgEtsi>`; 429 = retry later; seal certificates are issued by the
-CA/admin, not by this SDK.
-
-**«My QR» (0.13.0, namespace `GeregeSystems.EidMongolia.Qr`):** `EidQr.Parse` (`EIDMN-QR1:<token>`) →
-`EidQrClient.StartAsync` (`POST /authentication/qr` with an auto 22-char nonce) → `ResultAsync` / `CheckAsync` (long-poll)
-→ the citizen's own PIN2-signed **PS256 JWS** (`typ` `eidmn-myqr+jwt`, `x5c` = [qualified SIGN cert, issuing CA]) is
-verified (`X509Chain` custom root, QcCompliance, contentCommitment, issuer SKI, OCSP hard-fail, PSS, iss/sub/statement/
-aud/sid/nonce/time, data limits) → `QrResult` with the citizen's «My info» fields in payload order, source, photo,
-signer, `Sha256` (= CA audit `qrsha`). RP permission: `QR_PRESENT` only. Same rules as the Go and TS SDKs (CA vectors
-`testdata/myqr_vectors.json`).
-
-Client-side PAdES for eID Mongolia in pure C# (.NET 10; also targets .NET 8 for compatibility — .NET 8 is out of support since 2026-11-10 and will be dropped in a later release). The PDF never leaves the client: `Prepare` writes the signature
-revision (optionally a bilingual verification page with a QR code) and returns the 32-byte DTBS; the citizen signs it on
-their phone (CA signature session, `RAW_DIGEST_SIGNATURE`) or USB token; `CompleteAsync` verifies the signature, gets an
-RFC 3161 timestamp, embeds the CAdES CMS, collects OCSP/CRL and appends a DSS revision (PAdES-BASELINE-LT). `PrepareOptions.Appearance` adds an optional visible signature widget (QR, signer
-name/role, date — APPEARANCE_SPEC.md); `X/Y` is the preferred spot — the stamp moves off existing page content to
-the first free spot and `PreparedDocument.Placement` reports where it went and why (`Requested | Moved | Overlap |
-Unscanned`, PLACEMENT_SPEC.md). `Appearance.Page` 0 = the last page that is not an eID verify page (earlier revisions'
-verify pages — a `/Link` to `https://ca.eidmongolia.mn/verify/<docId>` — are skipped; PLACEMENT_SPEC §1a).
-`Appearance.Exact = true` draws the stamp exactly at the requested rect (a position the signer chose on a page preview):
-never moved, status `Requested` or `Overlap`. `VerifyPagePosition = "first"` (0.8.0+) puts the verify page at page 1
-(default `"last"`); page numbers in `Appearance.Page`, `SuggestPlacement` and `Placement.Page` always count the input
-PDF's pages (PAGE_SPEC §8a, PLACEMENT_SPEC §1b). `EidPades.SuggestPlacement(pdf, appearance)` runs Prepare's placement
-without a certificate, signing or network and returns the resolved page, rect, status and every page's visible size
-(`PlacementSuggestion`, PLACEMENT_SPEC §6b). `Completed`
-carries the metadata the RP backend registers with the CA (`POST /pdf/signatures`); `EidPades.Registration(done, …)`
-builds that request body (serialize it with `System.Text.Json`). OCSP/CRL evidence must match the certificate's CertID /
-issuer and be fresh; a revoked answer fails `CompleteAsync` with `LTV_UNAVAILABLE` whose `InnerException` is
-`CertificateRevokedException` (do not retry). Revocation source order is by certificate role: the **leaf** of each chain
-(signer, TSA) asks **OCSP first** with the full 10 s timeout (its CRL is fetched too and embedded alongside when valid,
-and is the fallback when no valid OCSP answer arrives); every **CA certificate** (each one after the first in a chain)
-uses its issuer's **CRL first** and sends **no OCSP request at all** when that CRL is valid — OCSP (normal 10 s timeout)
-is asked only when no valid CRL can be obtained. Neither valid → `LTV_UNAVAILABLE`. Install: `dotnet add package GeregeSystems.EidMongolia.Pades` (nuget.org). This is a native port of the Go
-reference (`eid-mongolia-sdk-go/pades`, profile `pades-client/1`); CI proves byte-identical output against the Go golden
-vectors on Windows and Linux. No validator is shipped — verification is a hash lookup against the CA registry, full
-cryptographic validation lives in the Go backend SDK. Errors are `EidPadesException` with a stable `Code`.
