@@ -12,16 +12,25 @@
     <PackageId>GeregeSystems.EidMongolia</PackageId>
     <Authors>Gerege Systems LLC</Authors>
     <Company>Gerege Systems LLC</Company>
-    <Description>eID Mongolia relying-party SDK core for .NET (in progress): RP-API client (Bearer, mTLS via HttpClient), typed errors, route table, wire types, ACSP_V2 / device link v3 / authCode helpers, response validator (deterministic X.509 path builder, ACSP_V2 / RAW_DIGEST signature checks), OCSP revocation checker, organisation / person (PKI_READ) / e-Seal / USB token / share services and «My QR». Native C# port of the Go and TypeScript reference SDKs; no package dependencies.</Description>
+    <Description>eID Mongolia relying-party SDK for .NET (server side): RP-API client (Bearer, mTLS via HttpClient), typed errors, authentication (push / device link / QR / Web2App / App2App), signing (digest / text / linked / certificate choice), session long-poll, response validator (deterministic X.509 path builder, ACSP_V2 / RAW_DIGEST signature checks), OCSP revocation checker, PDF signature registration, organisation / person (PKI_READ) / e-Seal / USB token / share services, «My QR» and the framework-neutral login-button backend (EidLoginHandler). Native C# port of the Go and TypeScript reference SDKs; no package dependencies.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>eid;mongolia;smart-id;authentication;signature;rp</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>eid;mongolia;smart-id;authentication;signature;rp;qr;identity</PackageTags>
     <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- core / Pades / AspNetCore нэг хувилбартай (lockstep). -->
     <Version>0.17.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="GeregeSystems.EidMongolia.Tests" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
     <!-- Нийтийн eID гинж 01–04 (Go roots.go NationalRootCAPEM / CitizenIntermediatesPEM-тэй байт-ижил). -->
     <EmbeddedResource Include="Trust/*.pem" LogicalName="eid.core.%(Filename).pem" />
   </ItemGroup>

@@ -11,8 +11,9 @@ using System.Threading.Tasks;
 
 namespace GeregeSystems.EidMongolia.Qr;
 
-// Core-ийн «Миний QR». Нийтийн төрлүүд (нэр, namespace, гишүүд) GeregeSystems.EidMongolia.Pades-ийнхтэй ЯГ ижил —
-// 0.17.0 lockstep release-д Pades core-оос хамаарч эдгээрийг [TypeForwardedTo]-оор дамжуулна (docs/release-0.17.0.md).
+// Core-ийн «Миний QR». Нийтийн төрлүүд (нэр, namespace, гишүүд) GeregeSystems.EidMongolia.Pades 0.16.0-ийнхтэй ЯГ ижил —
+// 0.17.0-оос Pades эдгээрийг [TypeForwardedTo]-оор энд дамжуулна (Pades Properties/TypeForwards.cs; CI compat job). Нийтийн
+// гишүүн өөрчлөх / хасах нь Pades 0.16.0-ийн хэрэглэгчдийг эвдэнэ.
 // Дотоод хэрэгжүүлэлт нь core-ийн хуваалцсан шалгагч дээр: гинж — ResponseValidator.FindPath (X509Chain биш, платформ
 // бүрд ижил), цуцлалт — OcspRevocationChecker (Go/TS дүрэм: OCSP unknown → revoked, thisUpdate ≤ 48 ц).
 

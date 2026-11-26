@@ -1,5 +1,7 @@
 name: Release
-# v* tag → CI (Windows + Linux golden) → nupkg → GitHub Release asset + GitHub Packages + nuget.org (Trusted Publishing).
+# v* tag → CI (Windows + Linux golden, compat, pack + шалгалт) → гурван lockstep багц (core, AspNetCore, Pades) → GitHub
+# Release asset + GitHub Packages + nuget.org (Trusted Publishing). Нийтлэх дараалал хамаарлаар: core эхэлж, дараа нь
+# түүнээс хамаардаг AspNetCore ба Pades. Шинэ package ID-уудын nuget.org-ийн урьдчилсан нөхцөл: docs/release-0.17.0.md.
 on:
   push:
     tags: ["v*"]
@@ -13,6 +15,8 @@ jobs:
   publish:
     needs: ci
     runs-on: ubuntu-latest
+    env:
+      IDS: GeregeSystems.EidMongolia GeregeSystems.EidMongolia.AspNetCore GeregeSystems.EidMongolia.Pades
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -24,20 +28,31 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           ls nupkg
-          test -f "nupkg/GeregeSystems.EidMongolia.Pades.$tag.nupkg" || { echo "::error::csproj <Version> ≠ tag $tag"; exit 1; }
+          ./build/check-packages.sh nupkg "$tag"
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" nupkg/*.nupkg --title "$GITHUB_REF_NAME" --notes "CHANGELOG.md-г үз."
+        run: gh release create "$GITHUB_REF_NAME" nupkg/*.nupkg nupkg/*.snupkg --title "$GITHUB_REF_NAME" --notes "CHANGELOG.md-г үз."
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
       - name: GitHub Packages
-        run: dotnet nuget push "nupkg/*.nupkg" --source "https://nuget.pkg.github.com/gerege-systems/index.json" --api-key "${{ github.token }}"
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for id in $IDS; do
+            dotnet nuget push "nupkg/$id.$tag.nupkg" --no-symbols --source "https://nuget.pkg.github.com/gerege-systems/index.json" --api-key "${{ github.token }}" --skip-duplicate
+          done
       - name: nuget.org — Trusted Publishing key
         id: nuget
         uses: NuGet/login@v1
         with:
           user: geregecore
       - name: nuget.org
-        run: dotnet nuget push "nupkg/*.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --skip-duplicate
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # .snupkg нь ижил хавтаснаас автоматаар (symbol server) илгээгдэнэ.
+          for id in $IDS; do
+            dotnet nuget push "nupkg/$id.$tag.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --skip-duplicate
+          done

@@ -585,43 +585,15 @@ public class RevocationTests
     }
 
     /// <summary>
-    /// «Миний QR»-ийн анхдагч цуцлалт (<c>EidQr.DefaultRevocationAsync</c>) Go/TS дүрмээр: OCSP unknown → revoked,
-    /// thisUpdate ∈ [now − 48 ц, now + 5 мин] (PAdES LTV-ийн 24 ц-ийн FreshAt-аас тусдаа). Эх: Go ocsp_test.go ба rp-conformance
-    /// ocsp кейсүүд good / revoked / unknown-is-revoked / stale-49h / max-age-edge-47h / next-update-passed / future-10m.
+    /// «Миний QR»-ийн OCSP (0.17.0-оос core-ийн <c>OcspRevocationChecker</c>, 48 ц, unknown → revoked; core-ийн тест ба
+    /// rp-conformance ocsp кейсүүд) PAdES LTV-ийн 24 ц-ийн <see cref="Revocation.FreshAt"/>-д нөлөөлөхгүй.
     /// </summary>
-    [Theory]
-    [InlineData("good", -1.0, 23.0, "good")]
-    [InlineData("revoked", -1.0, 23.0, "revoked")]
-    [InlineData("unknown", -1.0, 23.0, "revoked")] // өмнө нь "unknown" → QR_REVOCATION_UNKNOWN байсан
-    [InlineData("good", -30.0, null, "good")] // 24 ц-ийн дүрмээр "unknown" байсан
-    [InlineData("good", -47.0, null, "good")]
-    [InlineData("good", -49.0, 1.0, "unknown")] // [this, next] хамарсан ч 48 ц-аас хуучин
-    [InlineData("unknown", -49.0, 1.0, "unknown")]
-    [InlineData("revoked", -49.0, 1.0, "unknown")]
-    [InlineData("good", -2.0, -0.1, "unknown")] // nextUpdate өнгөрсөн
-    [InlineData("good", 10.0 / 60, null, "unknown")] // ирээдүй (> 5 мин)
-    public async Task MyQrDefaultRevocationFollowsGoOcspRule(string status, double thisHours, double? nextHours, string want)
-    {
-        var st = status switch
-        {
-            "good" => St.Good,
-            "revoked" => St.Revoked,
-            _ => St.Unknown,
-        };
-        var der = Ocsp(st, Now.AddHours(thisHours), nextHours is { } n ? Now.AddHours(n) : null);
-        using var http = new HttpClient(new Handler(der, null));
-        Assert.Equal(want, await GeregeSystems.EidMongolia.Qr.EidQr.DefaultRevocationAsync(Citizen, Ca04, CancellationToken.None, http, Now));
-    }
-
     [Fact]
-    public void MyQrOcspFreshnessIsSeparateFromLtv()
+    public void LtvFreshnessStaysSeparateFromMyQrOcsp()
     {
         var at = Now;
-        Assert.True(GeregeSystems.EidMongolia.Qr.EidQr.QrOcspFresh(at.AddHours(-47), null, at));
+        Assert.Equal(TimeSpan.FromHours(48), GeregeSystems.EidMongolia.OcspRevocationChecker.MaxAge);
         Assert.False(Revocation.FreshAt(at.AddHours(-47), null, at, at)); // PAdES LTV хэвээр 24 ц
-        Assert.False(GeregeSystems.EidMongolia.Qr.EidQr.QrOcspFresh(at.AddHours(-49), at.AddHours(1), at));
         Assert.True(Revocation.FreshAt(at.AddHours(-49), at.AddHours(1), at, at));
-        Assert.True(GeregeSystems.EidMongolia.Qr.EidQr.QrOcspFresh(at.AddMinutes(4), null, at));
-        Assert.False(GeregeSystems.EidMongolia.Qr.EidQr.QrOcspFresh(at.AddMinutes(6), null, at));
     }
 }
