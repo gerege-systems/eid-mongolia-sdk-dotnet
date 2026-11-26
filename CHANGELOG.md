@@ -5,13 +5,13 @@
 ## 0.18.0 — 2026-11-27
 
 **Гол өөрчлөлт:** **аюулгүй байдлын засвартай** release — `Prepare` / `Seal`-д өгсөн халдагчийн PDF процессыг унагах
-боломжтой байсныг хаав (доорх «Security»). Шинэ: `EidPades.ValidatePdfAsync` (PDF-ийн бүрэн шалгагч, корпус v14, 80/80 Go-тэй
+боломжтой байсныг хаав (доорх «Security»). Шинэ: `EidPades.ValidatePdfAsync` (PDF-ийн бүрэн шалгагч, корпус v15, 80/80 Go-тэй
 deep-equal), тамганы бүртгэл (`client.Seal.RegisterSealedPdfAsync`, `SealForDocumentAsync`), QR-тэй тамганы дардас (PAdES
 golden v13), cross-SDK корпус `rp-conformance/2`-ийн хатууруулалт (login cookie `__Host-eid_login`, push-ийн rate-limit
 түлхүүр hash, validator/OCSP-ийн дүрэм). Гурван багц (core, AspNetCore, Pades) lockstep 0.18.0.
 
 *English:* a **security release**. 0.17.0 and earlier `Prepare` / `Seal` can be crashed by a crafted PDF (see Security).
-New: `EidPades.ValidatePdfAsync` (full PDF validator, corpus v14, 80/80 deep-equal to Go), seal registration
+New: `EidPades.ValidatePdfAsync` (full PDF validator, corpus v15, 80/80 deep-equal to Go), seal registration
 (`client.Seal.RegisterSealedPdfAsync`, `SealForDocumentAsync`), the seal stamp with QR (PAdES golden v13), and the
 `rp-conformance/2` hardening (login cookie `__Host-eid_login`, hashed push rate-limit keys, validator/OCSP rules). All three
 packages ship in lockstep as 0.18.0.
@@ -48,9 +48,6 @@ OCSP-ийн issuer/responder түлхүүрийн шалгалт — дэлгэ�
 - **Маш том / олон revision-тэй PDF:** 128-аас олон xref хэсэгтэй эсвэл маш том object stream-тэй баримтыг `Prepare` / `Seal`
   татгалзана, validator `PDF_INVALID` гэж тайлагнана. *Documents with more than 128 xref sections or very large object
   streams are refused at Prepare/Seal and reported `PDF_INVALID` by the validator.*
-- **Харагдах дардасны `/Name`:** хожмын гарын үсгийн харагдах дардасны `/Name` нь гэрчилгээний харуулах нэртэй (GIVENNAME
-  SURNAME, эс бөгөөс CN) зөрвөл өмнөх гарын үсгүүд `modified_after_signing` болно. *A visible stamp whose `/Name` differs
-  from the certificate display name makes earlier signatures `modified_after_signing`.*
 - Нийтийн API-д зөвхөн нэмэлт (хуучин `SealAsync` delegate хэвээр).
 
 ### Added — `EidPades.ValidatePdfAsync` (ValidatePDF)
@@ -83,16 +80,16 @@ OCSP-ийн issuer/responder түлхүүрийн шалгалт — дэлгэ�
   дамжуулна); бүтцийн шалгалт ба revision-ийн шинжилгээ CancellationToken-ийг дагана; `platform_attested` зөвхөн
   өөрчлөгдөөгүй баримтад.
 
-### Security — `ValidatePdfAsync` хатууруулалт (корпус v14; Go PR #76, TS PR #100-ийн порт)
+### Security — `ValidatePdfAsync` хатууруулалт (корпус v14 → v15; Go PR #76, Go 9f68390, TS PR #100-ийн порт)
 
 - **Юу:**
   - Shadow attack: гарын үсгийн revision-оос хойш xref-ийн мөр өөрчлөгдөөгүй объект (ба түүний ObjStm) тэр revision дотор
     бүтнээрээ задрах ёстой — `/Length` нь гарын үсгийн мужаас цааш үргэлжилж хожмын revision-ийн байтаар «гүйцдэг» stream →
     `modified_after_signing` (өмнө нь `valid`).
-  - Хожмын гарын үсгийн итгэл: зөвхөн бүрэн бүтэн (integrity) хожмын гарын үсэг л «гарын үсгээр өргөтгөсөн» гэж тооцогдоно;
-    харагдах дардасны `/Name` нь тэр гарын үсгийн гэрчилгээний харуулах нэртэй (GIVENNAME SURNAME, эс бөгөөс CN) яг тэнцүү
-    байх ёстой. **Интеграторт:** өөр нэртэй дардас (эсвэл эвдэрсэн хожмын гарын үсэг) нэмсэн баримтад өмнөх гарын үсгүүд
-    `modified_after_signing` болно.
+  - Хожмын гарын үсгийн итгэл: зөвхөн бүрэн бүтэн (integrity) хожмын гарын үсэг л «гарын үсгээр өргөтгөсөн» гэж тооцогдоно.
+    **Интеграторт:** криптографаар таараагүй хожмын гарын үсэг нэмсэн баримтад өмнөх гарын үсгүүд `modified_after_signing`
+    болно. Харагдах дардасны `/Name`-ийг гэрчилгээний нэртэй харьцуулахгүй (eID desktop клиент тэнд порталын кирилл нэр
+    бичдэг, `PrepareOptions.SignerName` дурын нэр өгч болно); `signer_name` гэрчилгээнээс, `claimed_name` = `/Name`.
   - SignerInfo-ийн гарын үсгийн алгоритм SHA-1/MD5/MD2 (sha1/md5/md2WithRSA, dsa-with-sha1, ecdsa-with-SHA1, OIW sha1WithRSA)
     → `weak_algorithm` (digest SHA-256 байсан ч).
   - Бүтцийн урьдчилсан шалгалт (Go `CheckStructure`-тай ижил): xref хэсэг ≤ 128, xref stream-ийн `/W` элемент 0…8 ба мөрийн
@@ -109,7 +106,7 @@ OCSP-ийн issuer/responder түлхүүрийн шалгалт — дэлгэ�
     Go/TS-ийн дүрэм (тайлбар л өөрчлөгдсөн).
 - **Яагаад:** .NET/Java порт review-ийн дараах reference-ийн хатууруулалт; тайлан Go/TS-тэй байт-ижил байх.
 - **Хаана:** `Pdf/Structure.cs`, `Pdf/PdfDocument.cs`, `Validation/Extract.cs`, `Validation/Revisions.cs`,
-  `Validation/OwnAppearance.cs`, `Validation/Evaluate.cs`; корпус `testdata/pades-validate` = Go `222acbd` (v14, 80
+  `Validation/OwnAppearance.cs`, `Validation/Evaluate.cs`; корпус `testdata/pades-validate` = Go `9f68390` (v15, 80
   тохиолдол; `build/go-sdk-validate.ref`); README (3 хэл) — хязгаарын жагсаалт.
 - **Шалгасан:** корпусын 80 тохиолдол Go-ийн тайлантай deep-equal, `ValidatePdfHardeningTests`-ийн шинэ тестүүд — PR CI
   (windows + ubuntu).
