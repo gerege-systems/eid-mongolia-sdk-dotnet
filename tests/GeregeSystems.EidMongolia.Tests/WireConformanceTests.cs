@@ -1,17 +1,16 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace GeregeSystems.EidMongolia.Tests;
 
 /// <summary>
 /// Нэг wire вектор: SDK-ийн нэг дуудлага (<see cref="Op"/> + <see cref="Args"/>) → хүлээгдэж буй HTTP хүсэлт (method, зам,
-/// биеийн JSON — утгаар тулгана) + хиймэл хариу. Гараар порт хийсэн кейсүүд ба ирээдүйн cross-SDK corpus нэг хэлбэртэй.
+/// биеийн JSON — утгаар тулгана) + хиймэл хариу. Go/TS тестээс гараар порт хийсэн .NET-ийн нэмэлт кейсүүд; cross-SDK
+/// корпусын wire векторууд <see cref="ConformanceTests.Wire"/>-д.
 /// </summary>
 public sealed record WireCase(string Name, string Source, string Op, string Args, string Method, string Path, string? Body,
     int Status, string Response)
@@ -19,49 +18,8 @@ public sealed record WireCase(string Name, string Source, string Op, string Args
     public override string ToString() => Name;
 }
 
-/// <summary>
-/// Cross-SDK conformance corpus-ийн ачаалагч. TODO(rp-conformance-v1): Go репогийн <c>testdata/conformance</c>-ийг (tag
-/// <c>rp-conformance-v1</c>) <c>testdata/conformance</c> руу засваргүй хуулж (sync script + CI <c>--check</c> job,
-/// devicelink_golden.json шиг SHA-256 түгжээ), corpus-ийн бодит схемд <see cref="Load"/>-ийг тааруулна. Тэр болтол corpus
-/// алга — зөвхөн гараар порт хийсэн <see cref="WireConformanceTests.PortedCases"/> кейсүүд ажиллана.
-/// </summary>
-internal static class Conformance
-{
-    public static string Dir => System.IO.Path.Combine(AppContext.BaseDirectory, "testdata", "conformance", "wire");
-
-    /// <summary><c>testdata/conformance/wire/*.json</c> (файл бүр <see cref="WireCase"/>-ийн массив); алга бол хоосон.</summary>
-    public static IEnumerable<WireCase> Load()
-    {
-        if (!Directory.Exists(Dir))
-        {
-            yield break;
-        }
-        foreach (var f in Directory.EnumerateFiles(Dir, "*.json").OrderBy(x => x, StringComparer.Ordinal))
-        {
-            using var d = JsonDocument.Parse(File.ReadAllBytes(f));
-            foreach (var c in d.RootElement.EnumerateArray())
-            {
-                yield return new WireCase(
-                    c.GetProperty("name").GetString()!,
-                    System.IO.Path.GetFileName(f),
-                    c.GetProperty("op").GetString()!,
-                    c.GetProperty("args").GetRawText(),
-                    c.GetProperty("request").GetProperty("method").GetString()!,
-                    c.GetProperty("request").GetProperty("path").GetString()!,
-                    c.GetProperty("request").TryGetProperty("body", out var b) ? b.GetRawText() : null,
-                    c.GetProperty("response").GetProperty("status").GetInt32(),
-                    c.GetProperty("response").GetProperty("body").GetRawText());
-            }
-        }
-    }
-}
-
 public class WireConformanceTests
 {
-    private readonly ITestOutputHelper _out;
-
-    public WireConformanceTests(ITestOutputHelper output) => _out = output;
-
     private static JsonSerializerOptions J => EidHttp.Json;
 
     private static T Arg<T>(JsonElement a, string name) => a.TryGetProperty(name, out var v) ? v.Deserialize<T>(J)! : default!;
@@ -171,22 +129,6 @@ public class WireConformanceTests
     {
         var names = PortedCases().Select(c => c.Name).ToList();
         Assert.Equal(names.Count, names.Distinct().Count());
-    }
-
-    /// <summary>Corpus (<see cref="Conformance.Dir"/>) байвал бүх кейсийг ажиллуулна; алга бол алгасна (TODO rp-conformance-v1).</summary>
-    [Fact]
-    public async Task ConformanceCorpusWireCases()
-    {
-        var cases = Conformance.Load().ToList();
-        if (cases.Count == 0)
-        {
-            _out.WriteLine("testdata/conformance алга — rp-conformance-v1 corpus хараахан vendor хийгдээгүй (TODO)");
-            return;
-        }
-        foreach (var c in cases)
-        {
-            await Run(c);
-        }
     }
 
     private static async Task Run(WireCase c)

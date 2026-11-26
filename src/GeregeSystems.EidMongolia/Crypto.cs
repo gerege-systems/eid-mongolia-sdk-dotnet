@@ -78,7 +78,25 @@ public static class EidCrypto
         HashAlgorithms.Sha256 => SHA256.HashData(data),
         HashAlgorithms.Sha384 => SHA384.HashData(data),
         HashAlgorithms.Sha512 => SHA512.HashData(data),
-        _ => throw new EidValidationException("дэмжигдээгүй hashAlgorithm: " + name),
+        _ => throw new EidValidationException(ValidationReasons.AlgUnsupported, "дэмжигдээгүй hashAlgorithm: " + name),
+    };
+
+    /// <summary>Hash-ийн урт (байт); дэмжигдээгүй нэрэнд 0 (Go <c>cryptoHash(..).Size()</c>).</summary>
+    internal static int HashSize(string? name) => name switch
+    {
+        HashAlgorithms.Sha256 => 32,
+        HashAlgorithms.Sha384 => 48,
+        HashAlgorithms.Sha512 => 64,
+        _ => 0,
+    };
+
+    /// <summary>"SHA-256" | "SHA-384" | "SHA-512" → <see cref="HashAlgorithmName"/>; бусад нэрэнд default.</summary>
+    internal static HashAlgorithmName HashName(string? name) => name switch
+    {
+        HashAlgorithms.Sha256 => HashAlgorithmName.SHA256,
+        HashAlgorithms.Sha384 => HashAlgorithmName.SHA384,
+        HashAlgorithms.Sha512 => HashAlgorithmName.SHA512,
+        _ => default,
     };
 }
 

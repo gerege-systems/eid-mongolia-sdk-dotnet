@@ -3,6 +3,7 @@
 testdata/** -text
 src/GeregeSystems.EidMongolia.Pades/Assets/** -text
 src/GeregeSystems.EidMongolia.Pades/Trust/** -text
+src/GeregeSystems.EidMongolia/Trust/** -text
 *.pdf binary
 *.der binary
 *.p7s binary

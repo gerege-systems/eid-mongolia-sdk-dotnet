@@ -12,7 +12,7 @@
     <PackageId>GeregeSystems.EidMongolia</PackageId>
     <Authors>Gerege Systems LLC</Authors>
     <Company>Gerege Systems LLC</Company>
-    <Description>eID Mongolia relying-party SDK core for .NET (in progress): RP-API client (Bearer, mTLS via HttpClient), typed errors, route table, wire types, ACSP_V2 / device link v3 / authCode helpers. Native C# port of the Go and TypeScript reference SDKs; no package dependencies.</Description>
+    <Description>eID Mongolia relying-party SDK core for .NET (in progress): RP-API client (Bearer, mTLS via HttpClient), typed errors, route table, wire types, ACSP_V2 / device link v3 / authCode helpers, response validator (deterministic X.509 path builder, ACSP_V2 / RAW_DIGEST signature checks) and OCSP revocation checker. Native C# port of the Go and TypeScript reference SDKs; no package dependencies.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>eid;mongolia;smart-id;authentication;signature;rp</PackageTags>
     <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="GeregeSystems.EidMongolia.Tests" />
+    <!-- Нийтийн eID гинж 01–04 (Go roots.go NationalRootCAPEM / CitizenIntermediatesPEM-тэй байт-ижил). -->
+    <EmbeddedResource Include="Trust/*.pem" LogicalName="eid.core.%(Filename).pem" />
   </ItemGroup>
 
 </Project>

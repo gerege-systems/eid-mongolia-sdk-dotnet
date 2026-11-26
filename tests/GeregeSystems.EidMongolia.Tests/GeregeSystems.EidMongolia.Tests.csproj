@@ -20,8 +20,11 @@
 
   <ItemGroup>
     <None Include="../../testdata/devicelink_golden.json" CopyToOutputDirectory="PreserveNewest" Link="testdata/devicelink_golden.json" />
-    <!-- TODO(rp-conformance-v1): Go testdata/conformance-ийн хуулбар (одоогоор алга — glob хоосон). -->
-    <None Include="../../testdata/conformance/**/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="testdata/conformance" />
+    <None Include="../../testdata/myqr_vectors.json" CopyToOutputDirectory="PreserveNewest" Link="testdata/myqr_vectors.json" />
+    <!-- rp-conformance/1: Go testdata/conformance-ийн байт-ижил хуулбар (build/sync-conformance.sh, CI conformance-sync). -->
+    <None Include="../../testdata/conformance/**/*" CopyToOutputDirectory="PreserveNewest" LinkBase="testdata/conformance" />
+    <!-- Core-ийн шигтгэсэн 01–04 нь Pades-ийнхтэй байт-ижил эсэхийг шалгахад. -->
+    <None Include="../../src/GeregeSystems.EidMongolia.Pades/Trust/0*.pem" CopyToOutputDirectory="PreserveNewest" LinkBase="testdata/pades-trust" />
   </ItemGroup>
 
 </Project>
