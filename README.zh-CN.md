@@ -19,13 +19,12 @@ wire、登录后端）。
 |---|---|---|
 | `GeregeSystems.EidMongolia` | RP SDK：`EidClient`（Auth、Sign、Session、Validator、PDF 登记、Organization、Person、Seal、Token、Share、“我的 QR”）、`OcspRevocationChecker`、`EidLoginHandler` | — |
 | `GeregeSystems.EidMongolia.AspNetCore` | `services.AddEidMongolia(...)`、`app.MapEidLogin(...)` | core + ASP.NET Core 共享框架 |
-| `GeregeSystems.EidMongolia.Pades` | 客户端 PAdES：`EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration` | core + `System.Security.Cryptography.Pkcs`（Microsoft） |
+| `GeregeSystems.EidMongolia.Pades` | 客户端 PAdES：`EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration`；PDF 验证 `ValidatePdfAsync` | core + `System.Security.Cryptography.Pkcs`（Microsoft） |
 
 - 三个包版本一致（lockstep），`net8.0` 和 `net10.0`（多目标）。`net8.0` 运行时已于 2026-11-10 结束支持；为了让现有依赖方仍能
   restore，暂时保留，将在后续版本中移除。
 - 线程安全，无全局状态：所有请求共用一个 `EidClient`（单例）。API secret 只保存在后端。
-- 本 SDK **尚未提供**完整的 PDF 验证器（`ValidatePDF`）——请使用 Go `pades.ValidatePDF` 或 TS `validatePdf`
-  （见“与 Go / TS 的功能对比”）。
+- 完整的 PDF 验证——`EidPades.ValidatePdfAsync`（与 Go `pades.ValidatePDF`、TS `validatePdf` 报告相同；见“验证 PDF”）。
 
 ## 安装
 
@@ -500,6 +499,41 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 - 新的 RP 工作（认证、签名会话、登记）请使用 core 的 `EidClient`——用 `client.Sign` / `client.Seal` / `client.Pdf` 代替
   “PAdES”一节中手写 `HttpClient` 的示例。
 
+## 验证 PDF（`EidPades.ValidatePdfAsync`）
+
+完整验证已签名或已盖章的 PDF——与 Go `pades.ValidatePDF`、TS `validatePdf` 及 CA 的 `POST /v3/validate/pdf` **规则相同、JSON
+报告相同**（`PdfReport.ToJson()`；不含 CA 登记字段 `session_id` / `doc_id` / `on_behalf_of_*` / `stamp_lookup`）。文档不会被发送到任何
+地方——在线吊销检查只发送证书序列号（OCSP 请求）。
+
+```csharp
+using GeregeSystems.EidMongolia.Pades;
+
+PdfReport rep = await EidPades.ValidatePdfAsync(pdfBytes, new ValidatePdfOptions
+{
+    // Roots / Intermediates / Issuers —— 默认：内置的国家根 CA（01）、02–05、eID 签发者 04/05。
+    // Time —— 验证时间（默认当前）；Offline = true —— 仅使用文档的 DSS；HttpClient —— OCSP/CRL（测试/代理）。
+}, ct);
+if (rep.Indication != "valid") { /* rep.Signatures[i].Problems */ }
+string json = rep.ToJson();
+```
+
+- 检查项：ByteRange（间隙恰好是该 /Contents）与 messageDigest、CMS/CAdES 签名（RSA PKCS#1、RSA-PSS、ECDSA；拒绝小于 2048
+  位的 RSA 密钥）、signing-certificate-v2、证书链（自建路径构建——不使用 X509Chain，Windows 与 Linux 结果一致；拒绝未知的关键
+  扩展及带名称约束的 CA）、KU/EKU（`usage`）、有效期、RFC 3161 时间戳（TSA 链、timeStamping EKU）、吊销、LTV 覆盖、
+  `signature_level`（B/T/LT）、`certificate_level`、`key_medium`。
+- 签名后的修改：每个后续修订都按解析后的对象图比较（CA 公共验证器的规则）——仅新增签名/DSS 时为 `extended_by_signatures_only`；
+  可见签名与机构印章外观（带/不带 QR，APPEARANCE_SPEC §5/§6）用写入器代码重新生成后比对；其他一律为 `modified_after_signing`。
+- 吊销（eID 04/05 签发的证书）：在线——AIA OCSP，否则 CDP CRL（签发者签名、CertID）；无响应或 `Offline` 时使用文档 DSS 中的
+  OCSP/CRL；证据须在验证时间是新鲜的（PAdES LTV 的 24 小时规则，与 RP OCSP 检查器的 48 小时规则分开）。都没有时为
+  `revocation_unavailable`（indeterminate）。
+- 错误（`EidPadesException.RawCode`）：`PDF_TOO_LARGE`（> 10 MiB）、`PDF_INVALID`、`PDF_ENCRYPTED`（/Encrypt——即使密码为空）、
+  `PDF_NO_SIGNATURE`、`PDF_TOO_MANY_SIGNATURES`（> 16）、`REQUEST_INVALID`（Roots/Intermediates/Issuers 无法解析）。
+- 针对攻击者可控 PDF 的限制：解析前的结构检查（嵌套 ≤ 256、ObjStm 预算）；修订解析器递归 ≤ 64、节点 ≤ 1,000,000、
+  解压 ≤ 64 MiB、xref 段 ≤ 128、对象号 < 2^23；每个 FlateDecode 流 ≤ 64 MiB；DSS 流 ≤ 1 MiB（每类 ≤ 64 个）；证书链构建
+  ≤ 100 次尝试；OCSP 响应 ≤ 16 KiB，HTTP ≤ 4 MiB、10 秒。
+- 一致性：`testdata/pades-validate` = Go v0.31.0 的 `pades/testdata/validate`（及其引用的 golden 文件）
+  （`./build/sync-validate.sh`，CI `validate-sync`）；每个用例的报告与 Go 的报告深度相等（`ValidatePdfCorpusTests`）。
+
 ## 与 Go / TS 的功能对比
 
 | 功能 | .NET 0.17.0 | Go | TS |
@@ -517,8 +551,8 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 | “我的 QR” | ✓ | ✓ | ✓ |
 | “使用 eID 登录”后端 | ✓（+ ASP.NET Core） | ✓（`net/http`） | ✓（+ `<eid-login-button>`） |
 | PAdES prepare / complete / suggestPlacement / 登记请求体 | ✓ | ✓ | ✓ |
-| 完整 PDF 验证器（`ValidatePDF`） | — | ✓ | ✓ |
-| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：验证器与 `Prepare` 的 docId） | —（golden v12） | ✓ v0.31.0 | ✓ 0.49.0 |
+| 完整 PDF 验证器（`ValidatePDF`） | ✓ `ValidatePdfAsync`（pades-validate/1） | ✓ | ✓ |
+| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：验证器与 `Prepare` 的 docId） | 验证器 ✓；`Prepare` —（golden v12） | ✓ v0.31.0 | ✓ 0.49.0 |
 | 印章登记（`POST /seal/{org}/registrations`） | — | — | — |
 | `pdfDigest`、浏览器入口、`convert` | — | — | ✓（仅 TS） |
 

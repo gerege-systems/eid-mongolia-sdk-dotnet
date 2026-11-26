@@ -20,13 +20,12 @@ validator, OCSP, wire, login backend) шалгадаг.
 |---|---|---|
 | `GeregeSystems.EidMongolia` | RP SDK: `EidClient` (Auth, Sign, Session, Validator, PDF бүртгэл, Organization, Person, Seal, Token, Share, «Миний QR»), `OcspRevocationChecker`, `EidLoginHandler` | — |
 | `GeregeSystems.EidMongolia.AspNetCore` | `services.AddEidMongolia(...)`, `app.MapEidLogin(...)` | core + ASP.NET Core shared framework |
-| `GeregeSystems.EidMongolia.Pades` | Client-side PAdES: `EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration` | core + `System.Security.Cryptography.Pkcs` (Microsoft) |
+| `GeregeSystems.EidMongolia.Pades` | Client-side PAdES: `EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration`; PDF шалгах `ValidatePdfAsync` | core + `System.Security.Cryptography.Pkcs` (Microsoft) |
 
 - Гурвуулаа нэг хувилбартай (lockstep), `net8.0` ба `net10.0` (multi-target). `net8.0`-ийн runtime 2026-11-10-нд дэмжлэгээс
   гарсан; одоогийн relying party-ууд restore хийж чадахын тулд түр хадгалсан бөгөөд дараагийн хувилбаруудын нэгд хасна.
 - Thread-safe, глобал төлөвгүй: нэг `EidClient`-ийг (singleton) бүх хүсэлтэд. API secret зөвхөн backend-д.
-- PDF-ийн бүрэн шалгагч (`ValidatePDF`) энэ SDK-д **хараахан байхгүй** — Go `pades.ValidatePDF` эсвэл TS `validatePdf`
-  («Go / TS-тэй харьцуулсан дэмжлэг»).
+- PDF-ийн бүрэн шалгагч — `EidPades.ValidatePdfAsync` (Go `pades.ValidatePDF`, TS `validatePdf`-тэй ижил тайлан; «PDF шалгах»).
 
 ## Суулгах
 
@@ -503,6 +502,42 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 - RP-ийн шинэ ажилд (нэвтрэлт, гарын үсгийн session, бүртгэл) core-ийн `EidClient`-ийг хэрэглэнэ — README-ийн «PAdES»-ийн
   гараар бичсэн `HttpClient` жишээнүүдийн оронд `client.Sign` / `client.Seal` / `client.Pdf`.
 
+## PDF шалгах (`EidPades.ValidatePdfAsync`)
+
+Гарын үсэгтэй / тамгалсан PDF-ийг бүрэн шалгана — Go `pades.ValidatePDF`, TS `validatePdf` ба CA-ийн `POST /v3/validate/pdf`-тэй
+**ижил дүрэм, ижил JSON тайлан** (`PdfReport.ToJson()`; CA-ийн бүртгэлийн `session_id` / `doc_id` / `on_behalf_of_*` /
+`stamp_lookup` байхгүй). Баримт хаашаа ч илгээгдэхгүй — онлайн цуцлалтад зөвхөн гэрчилгээний serial (OCSP хүсэлт) явна.
+
+```csharp
+using GeregeSystems.EidMongolia.Pades;
+
+PdfReport rep = await EidPades.ValidatePdfAsync(pdfBytes, new ValidatePdfOptions
+{
+    // Roots / Intermediates / Issuers — анхдагчаар шигтгэсэн үндэсний Root CA (01), 02–05, eID олгогч 04/05.
+    // Time — шалгах цаг (анхдагч одоо); Offline = true — зөвхөн баримтын DSS; HttpClient — OCSP/CRL (тест/proxy).
+}, ct);
+if (rep.Indication != "valid") { /* rep.Signatures[i].Problems */ }
+string json = rep.ToJson();
+```
+
+- Шалгалт: ByteRange (завсар нь зөвхөн тухайн /Contents) ба messageDigest, CMS/CAdES гарын үсэг (RSA PKCS#1, RSA-PSS, ECDSA;
+  RSA < 2048 бит хүлээн авахгүй), signing-certificate-v2, гинж (өөрийн path builder — X509Chain биш, Windows/Linux-д ижил;
+  танихгүй critical extension ба name constraints-тэй CA-г татгалзана), KU/EKU (`usage`), хугацаа, RFC 3161 цагийн тэмдэг
+  (TSA гинж, timeStamping EKU), цуцлалт, LTV хамралт, `signature_level` (B/T/LT), `certificate_level`, `key_medium`.
+- Гарын үсгийн дараах өөрчлөлт: revision бүрийг задалсан объектын графаар харьцуулна (CA-ийн нийтийн шалгагчийн дүрэм) —
+  зөвхөн гарын үсэг/DSS нэмсэн бол `extended_by_signatures_only`; харагдах гарын үсэг ба байгууллагын тамганы дардасыг
+  (QR-тэй/QR-гүй, APPEARANCE_SPEC §5/§6) бичигчийн кодоор дахин үүсгэж тулгана; бусад бүх зүйл `modified_after_signing`.
+- Цуцлалт (eID-ийн 04/05-ийн гэрчилгээнд): онлайн — AIA OCSP, эс бөгөөс CDP CRL (олгогчийн гарын үсэг, CertID); хариугүй
+  эсвэл `Offline` бол баримтын DSS-ийн OCSP/CRL; нотолгоо шалгах цагт шинэлэг байх ёстой (PAdES LTV-ийн 24 цагийн дүрэм,
+  RP-ийн OCSP шалгагчийн 48 цагийн дүрмээс тусдаа). Аль нь ч үгүй бол `revocation_unavailable` (indeterminate).
+- Алдаа (`EidPadesException.RawCode`): `PDF_TOO_LARGE` (> 10 MiB), `PDF_INVALID`, `PDF_ENCRYPTED` (/Encrypt — хоосон нууц
+  үгтэй ч), `PDF_NO_SIGNATURE`, `PDF_TOO_MANY_SIGNATURES` (> 16), `REQUEST_INVALID` (Roots/Intermediates/Issuers задрахгүй).
+- Халдагчийн PDF-ийн хязгаар: задлахаас өмнө бүтцийн шалгалт (давхарлалт ≤ 256, ObjStm-ийн төсөв); revision-ийн задлагчид
+  рекурс ≤ 64, нийт ≤ 1 000 000 зангилаа, inflate ≤ 64 MiB, xref хэсэг ≤ 128, объектын дугаар < 2^23; FlateDecode тус бүр
+  ≤ 64 MiB; DSS-ийн stream ≤ 1 MiB (≤ 64 ширхэг); гинжийн угсралт ≤ 100 оролдлого; OCSP хариу ≤ 16 KiB, HTTP ≤ 4 MiB, 10 с.
+- Conformance: `testdata/pades-validate` = Go v0.31.0-ийн `pades/testdata/validate` (+ заасан golden файлууд)
+  (`./build/sync-validate.sh`, CI `validate-sync`); тохиолдол бүрийн тайланг Go-ийнхтэй deep-equal (`ValidatePdfCorpusTests`).
+
 ## Go / TS-тэй харьцуулсан дэмжлэг
 
 | Боломж | .NET 0.17.0 | Go | TS |
@@ -520,8 +555,8 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 | «Миний QR» | ✓ | ✓ | ✓ |
 | «eID-ээр нэвтрэх» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / бүртгэлийн бие | ✓ | ✓ | ✓ |
-| PDF-ийн бүрэн шалгагч (`ValidatePDF`) | — | ✓ | ✓ |
-| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч ба `Prepare`-ийн docId) | — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
+| PDF-ийн бүрэн шалгагч (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
+| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч ба `Prepare`-ийн docId) | шалгагч ✓; `Prepare` — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
 | Тамганы бүртгэл (`POST /seal/{org}/registrations`) | — | — | — |
 | `pdfDigest`, хөтчийн entry, `convert` | — | — | ✓ (TS-д л) |
 

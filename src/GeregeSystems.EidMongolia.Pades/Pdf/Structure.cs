@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace GeregeSystems.EidMongolia.Pades.Pdf;
 
@@ -37,13 +38,14 @@ internal static class Structure
     private static readonly byte[][] Keywords = { "obj"u8.ToArray(), "trailer"u8.ToArray() };
 
     /// <exception cref="PdfStructureException"/>
-    public static void Check(byte[] doc)
+    public static void Check(byte[] doc, CancellationToken ct = default)
     {
-        var s = new Scan(NestScanFactor * doc.Length + (1 << 20), MaxObjStmBytes, EncryptRef.IsMatch(Latin1.FromBytes(doc)));
+        var s = new Scan(NestScanFactor * doc.Length + (1 << 20), MaxObjStmBytes);
         foreach (var kw in Keywords)
         {
             for (int i = 0; ;)
             {
+                ct.ThrowIfCancellationRequested();
                 int j = doc.AsSpan(i).IndexOf(kw);
                 if (j < 0) break;
                 int k = i + j;
@@ -211,16 +213,14 @@ internal static class Structure
     {
         private long _budget;
         private long _inflateLeft;
-        private readonly bool _encrypted;
 
         /// <summary>Дээд түвшний /Size &gt; MaxXrefSize.</summary>
         public bool BigSize;
 
-        public Scan(long budget, long inflateLeft, bool encrypted)
+        public Scan(long budget, long inflateLeft)
         {
             _budget = budget;
             _inflateLeft = inflateLeft;
-            _encrypted = encrypted;
         }
 
         /// <summary>b[start:end]-аас уншигчийн нэг объектыг (давхар `N G obj`-ийг оруулаад) гүнээр шалгана.</summary>
@@ -279,6 +279,11 @@ internal static class Structure
                     case Tok.Dict:
                         if (stack.Count >= MaxNesting) throw new PdfStructureException();
                         if (stack.Count == 1 && stack[0].Dict && stack[0].Key == "DecodeParms") info.Parms = true;
+                        if (stack.Count == 1 && stack[0].Dict && stack[0].Key == "Filter")
+                        {
+                            info.Filter = ""; // давхар түлхүүрийн сүүлийнх; массивын нэрсийг NoteScalar тоолно (Go 900de73)
+                            info.Filters = 0;
+                        }
                         stack.Add(new Frame { Dict = tok == Tok.Dict, ExpectKey = tok == Tok.Dict });
                         continue;
                     case Tok.ArrEnd:
@@ -299,6 +304,8 @@ internal static class Structure
                                     {
                                         if (stack.Count == 1 && stack[0].Dict && stack[0].Key is "Type" or "Filter" or "DecodeParms" or "N" or "First")
                                             info.Indirect = true;
+                                        // /Filter [6 0 R] — уншигч Index()-ээр resolve хийж задална (Go 900de73).
+                                        if (stack.Count == 2 && stack[0].Dict && stack[0].Key == "Filter") info.Indirect = true;
                                         done = true; // лавлагаа = нэг утга
                                     }
                                     else if (t3 == Tok.Word && l.Val == "obj")
@@ -343,6 +350,11 @@ internal static class Structure
                             info.Filter = val;
                             info.Filters = 1;
                         }
+                        else
+                        {
+                            info.Filter = ""; // null → уншигч шүүлтүүргүй уншина; давхар түлхүүрийн сүүлийнх (Go 900de73)
+                            info.Filters = 0;
+                        }
                         break;
                     case "DecodeParms":
                         if (!(tok == Tok.Word && val == "null")) info.Parms = true;
@@ -368,7 +380,7 @@ internal static class Structure
         /// <summary>`stream`-ийн араас FlateDecode өгөгдлийг (zlib өөрөө төгсөнө) задалж, толгойн offset бүрээс объектыг шалгана.</summary>
         private void ObjStm(Lex l, ObjStmInfo info)
         {
-            if (l.Next() != Tok.Word || l.Val != "stream" || _encrypted) return;
+            if (l.Next() != Tok.Word || l.Val != "stream") return;
             if (info.Indirect) throw new PdfStructureException(); // /Type /Filter /N /First лавлагаагаар — хууль ёсны баримтад гардаггүй
             if (info.Typ != "ObjStm") return;
             var b = l.B;
@@ -380,7 +392,8 @@ internal static class Structure
                 ObjStmData(b, p, l.End, info); // шахаагүй ObjStm — өгөгдөл нь файлын үлдсэн хэсэг
                 return;
             }
-            if (info.Filters != 1 || info.Filter != "FlateDecode") return; // уншигч дэмжихгүй шүүлтүүр
+            if (info.Filters > 1) throw new PdfStructureException(); // уншигч [/FlateDecode /FlateDecode …]-г гинжлэн задалдаг — давтахгүй (Go 900de73)
+            if (info.Filter != "FlateDecode") return; // уншигч дэмжихгүй шүүлтүүр
             if (info.Parms) throw new PdfStructureException(); // predictor-тэй ObjStm-ийг давтахгүй — fail-closed
             var data = Inflate(b, p, l.End, _inflateLeft);
             if (data is null) return; // уншигч мөн задалж чадахгүй
