@@ -82,7 +82,8 @@ public class ValidatePdfCorpusTests
                 Assert.True(sums.ContainsKey(rel) || sums.ContainsKey("validate/" + rel), "manifest-ийн файл SHA256SUMS-д алга: " + rel);
             }
         }
-        Assert.Equal(67, Manifest.GetProperty("cases").GetArrayLength());
+        Assert.Equal(14, Manifest.GetProperty("version").GetInt32());
+        Assert.Equal(80, Manifest.GetProperty("cases").GetArrayLength());
     }
 
     /// <summary>Корпусын HTTP replay (TS validate-golden.test.ts-ийн fetch-тэй ижил түлхүүр).</summary>

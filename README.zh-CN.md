@@ -387,7 +387,7 @@ string body = JsonSerializer.Serialize(reg);
 
 | `Code` | 代码 | 含义 |
 |---|---|---|
-| `PdfInvalid` | `PDF_INVALID` | PDF 无法解析；结构过深（嵌套 > 256）或存在 ObjStm 循环、`/Extends` > 64、`/Size` > 2^21（PRECHECKS #2a/#2b） |
+| `PdfInvalid` | `PDF_INVALID` | PDF 无法解析；结构过深（嵌套 > 256）或存在 ObjStm 循环、`/Extends` > 64、`/Size` > 2^21、xref 段 > 128、xref 流 `/W` `/Index` 限制、ObjStm 工作量 > 1 GiB（PRECHECKS #2a/#2b） |
 | `PdfEncrypted` | `PDF_ENCRYPTED` | PDF 已加密 |
 | `PdfLocked` | `PDF_LOCKED` | DocMDP P=1——禁止修改 |
 | `PdfTooLarge` | `PDF_TOO_LARGE` | 超过 9.75 MiB（输入）/ 10 MiB（输出） |
@@ -549,15 +549,24 @@ string json = rep.ToJson();
   `signature_level`（B/T/LT）、`certificate_level`、`key_medium`。
 - 签名后的修改：每个后续修订都按解析后的对象图比较（CA 公共验证器的规则）——仅新增签名/DSS 时为 `extended_by_signatures_only`；
   可见签名与机构印章外观（带/不带 QR，APPEARANCE_SPEC §5/§6）用写入器代码重新生成后比对；其他一律为 `modified_after_signing`。
+  只有通过完整性校验的后续签名才算作“仅由签名扩展”；可见外观的 `/Name` 必须与该签名证书的显示名（GIVENNAME SURNAME，否则 CN）
+  完全一致——若添加了不同姓名的外观，之前的签名为 `modified_after_signing`。自签名修订以来 xref 条目未变的每个对象（及其对象流）
+  必须能在该修订内完整解析（shadow attack——否则为 `modified_after_signing`）。`platform_attested` 姓名只在文档未被修改（或仅由
+  签名扩展）时显示。
 - 吊销（eID 04/05 签发的证书）：在线——AIA OCSP，否则 CDP CRL（签发者签名、CertID）；无响应或 `Offline` 时使用文档 DSS 中的
   OCSP/CRL；证据须在验证时间是新鲜的（PAdES LTV 的 24 小时规则，与 RP OCSP 检查器的 48 小时规则分开）。都没有时为
   `revocation_unavailable`（indeterminate）。
 - 错误（`EidPadesException.RawCode`）：`PDF_TOO_LARGE`（> 10 MiB）、`PDF_INVALID`、`PDF_ENCRYPTED`（/Encrypt——即使密码为空）、
   `PDF_NO_SIGNATURE`、`PDF_TOO_MANY_SIGNATURES`（> 16）、`REQUEST_INVALID`（Roots/Intermediates/Issuers 无法解析）。
-- 针对攻击者可控 PDF 的限制：解析前的结构检查（嵌套 ≤ 256、ObjStm 预算）；修订解析器递归 ≤ 64、节点 ≤ 1,000,000、
-  解压 ≤ 64 MiB、xref 段 ≤ 128、对象号 < 2^23；每个 FlateDecode 流 ≤ 64 MiB；DSS 流 ≤ 1 MiB（每类 ≤ 64 个）；证书链构建
-  ≤ 100 次尝试；OCSP 响应 ≤ 16 KiB，HTTP ≤ 4 MiB、10 秒。
-- 一致性：`testdata/pades-validate` = Go v0.31.0 的 `pades/testdata/validate`（及其引用的 golden 文件）
+- 针对攻击者可控 PDF 的限制（与 Go/TS 相同——超出时为 `PDF_INVALID`）：解析前的结构检查——嵌套 ≤ 256；xref 段 ≤ 128
+  （超过 128 次增量更新的文档为 `PDF_INVALID`）；xref 流的每个 `/W` 项为 0…8 且行宽 > 0，`/Index` 的 start + count ≤ 2^21，
+  所有 xref 流的行数合计 ≤ 2^21；xref 流与对象流只允许单个过滤器；解压后的 xref 流 + 对象流合计 ≤ 32 MiB；对象流成员查找工作量
+  （头部条目数 × 解压长度之和）≤ 1 GiB（成员极多的对象流为 `PDF_INVALID`）。签名：每个 CMS 或时间戳令牌 ≤ 32 个证书，
+  RSA ≤ 8192 位，e ≤ 2^32−1，证书/TSTInfo 序列号 ≤ 160 位（数值）——否则该签名为 `malformed_signature`；SignerInfo 签名算法为
+  SHA-1/MD5/MD2 时为 `weak_algorithm`。DSS：流 ≤ 1 MiB（每类 ≤ 64 个），解码合计 ≤ 8 MiB，被重复引用的流只读取一次。.NET 额外
+  防护（不影响报告）：修订解析器递归 ≤ 64、节点 ≤ 1,000,000、解压 ≤ 64 MiB、对象号 < 2^23；读取器每个 FlateDecode 流 ≤ 64 MiB、
+  每次打开合计 ≤ 256 MiB、递归 ≤ 512，对象流头部只建立一次索引；证书链构建 ≤ 100 次尝试；OCSP 响应 ≤ 16 KiB，HTTP ≤ 4 MiB、10 秒。
+- 一致性：`testdata/pades-validate` = Go `222acbd` 的 `pades/testdata/validate`（语料 v14，80 个用例；及其引用的 golden 文件）
   （`./build/sync-validate.sh`，CI `validate-sync`）；每个用例的报告与 Go 的报告深度相等（`ValidatePdfCorpusTests`）。
 
 ## 与 Go / TS 的功能对比

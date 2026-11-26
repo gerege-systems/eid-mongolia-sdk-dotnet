@@ -58,6 +58,9 @@ internal static class OwnAppearance
         // Sig dict-ийн шалгалт OwnTextLimit-ээс урт /Name-ийг ямар ч байсан татгалзана; энд эрт татгалзсанаар олон мегабайтын
         // нэр доорх (квадрат) мөр хуваалтад орохгүй.
         if (ns0 is not PStr ns || ms0 is not PStr ms || ns.V.Length > Classifier.OwnTextLimit) throw Fail();
+        // Дардасны нэр = гарын үсэг зурагчийн гэрчилгээний харуулах нэр (Go appearance.go ownVisible): хожмын (хуурамч,
+        // итгэмжлэгдээгүй) гарын үсэг өөр хүний нэрээр дардас нэмэхгүй.
+        if (meta.Name == "" || OwnText.PdfTextString(ns) != meta.Name) throw Fail();
         var m = ms.V;
         if (!OwnText.OwnDate(m) || m.Substring(16) != "+08'00'") throw Fail();
         var date = m.Substring(2, 4) + "-" + m.Substring(6, 2) + "-" + m.Substring(8, 2) + " " + m.Substring(10, 2) + ":" + m.Substring(12, 2) + " (+08)";

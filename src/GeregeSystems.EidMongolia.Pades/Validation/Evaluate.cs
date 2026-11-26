@@ -387,7 +387,8 @@ internal sealed class Evaluator
         {
             s.ProblemList.Add(ProblemRevocationUnknown);
         }
-        // .NET-ийн нэмэлт (Go/TS-д алга, корпуст нөлөөгүй): өөрчлөгдсөн баримтын /Name-ийг платформын баталсан гэж харуулахгүй.
+        // Баримт гарын үсгийн дараа (гарын үсгээс өөрөөр) өөрчлөгдсөн бол /Name-ийг платформын баталсан гэж харуулахгүй (Go validate.go,
+        // TS evaluate.ts; корпус v14 doc-signer-modified).
         if (trusted && info.IssuedByEid && info.Usage == "document_signer" && !s.ProblemList.Contains(ProblemRevoked) && (r.CoversWhole || r.LaterSignaturesOnly))
         {
             s.SignerName = r.SignerName;
@@ -449,7 +450,7 @@ internal sealed class Evaluator
     }
 
     /// <summary>eidcrypto.SubjectDisplayName.</summary>
-    private static string DisplayName(ValCert c)
+    internal static string DisplayName(ValCert c)
     {
         var (given, surname) = GoFmt.SubjectNames(c.RawSubject);
         var n = GoTrim(given + " " + surname);

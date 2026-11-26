@@ -24,6 +24,13 @@ internal sealed class SigMeta
 
     /// <summary>Гарын үсэг зурагчийн гэрчилгээ e-Seal (APPEARANCE_SPEC.md §6.1).</summary>
     public bool Seal;
+
+    /// <summary>
+    /// Гарын үсэг зурагчийн гэрчилгээний харуулах нэр (eidcrypto.SubjectDisplayName; задрахгүй бол ""). Дардасны /Name яг үүнтэй
+    /// тэнцүү байх ёстой (Go appearance.go sigMeta.name): эс бөгөөс хожмын гарын үсэг өөр хүний нэрээр дардас нэмж, өмнөх гарын
+    /// үсгүүд «зөвхөн гарын үсгээр өргөтгөгдсөн» хэвээр үлдэнэ.
+    /// </summary>
+    public string Name = "";
 }
 
 /// <summary>Гарын үсгийн мужийн дараах revision-уудын дүгнэлт.</summary>
@@ -487,7 +494,21 @@ internal sealed class Classifier
                 Changed.Add(num);
                 continue;
             }
-            if (be == fe && (be.Kind == P.EntUse || P.Ent(Base.Xref, be.Off) == P.Ent(Fin.Xref, fe.Off))) continue;
+            if (be == fe && (be.Kind == P.EntUse || P.Ent(Base.Xref, be.Off) == P.Ent(Fin.Xref, fe.Off)))
+            {
+                // Shadow attack (Go revisions.go diff, TS revisions.ts): xref-ийн мөр өөрчлөгдөөгүй объект (ба түүний ObjStm) суурийн
+                // байт дотор бүтнээрээ задрах ёстой — stream-ийн /Length суурийн төгсгөлөөс цааш үргэлжилж хожмын revision-ийн байтаар
+                // «гүйцэх»-ийг хориглоно (Base харагдац нь эхний End байт тул задлагч төгсгөлөөс цааш уншихгүй).
+                try
+                {
+                    Base.Get(num);
+                }
+                catch (PdfObjException)
+                {
+                    throw NotSignatureOnly();
+                }
+                continue;
+            }
             var bo = Base.Get(num);
             var fo = Fin.Get(num);
             bool unpack = be.Kind == P.EntComp && fe.Kind == P.EntUse && fe.Gen == 0 && (Own || (!Strict && OwnProfile && !DssOnly));

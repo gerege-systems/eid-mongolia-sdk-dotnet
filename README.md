@@ -393,7 +393,7 @@ string body = JsonSerializer.Serialize(reg);
 
 | `Code` | Код | Утга |
 |---|---|---|
-| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй; бүтэц хэт гүн (давхарлалт > 256) эсвэл ObjStm мөчлөг, `/Extends` > 64, `/Size` > 2^21 (PRECHECKS #2a/#2b) |
+| `PdfInvalid` | `PDF_INVALID` | PDF задрахгүй; бүтэц хэт гүн (давхарлалт > 256) эсвэл ObjStm мөчлөг, `/Extends` > 64, `/Size` > 2^21, xref хэсэг > 128, xref stream-ийн `/W` `/Index` хязгаар, ObjStm-ийн ажил > 1 GiB (PRECHECKS #2a/#2b) |
 | `PdfEncrypted` | `PDF_ENCRYPTED` | Шифрлэгдсэн PDF |
 | `PdfLocked` | `PDF_LOCKED` | DocMDP P=1 — өөрчлөхийг хориглосон |
 | `PdfTooLarge` | `PDF_TOO_LARGE` | 9.75 MiB (оролт) / 10 MiB (гаралт)-аас их |
@@ -557,16 +557,29 @@ string json = rep.ToJson();
 - Гарын үсгийн дараах өөрчлөлт: revision бүрийг задалсан объектын графаар харьцуулна (CA-ийн нийтийн шалгагчийн дүрэм) —
   зөвхөн гарын үсэг/DSS нэмсэн бол `extended_by_signatures_only`; харагдах гарын үсэг ба байгууллагын тамганы дардасыг
   (QR-тэй/QR-гүй, APPEARANCE_SPEC §5/§6) бичигчийн кодоор дахин үүсгэж тулгана; бусад бүх зүйл `modified_after_signing`.
+  Зөвхөн бүрэн бүтэн (криптографаар таарсан) хожмын гарын үсэг л «гарын үсгээр өргөтгөсөн» гэж тооцогдоно; харагдах
+  дардасны `/Name` нь тэр гарын үсгийн гэрчилгээний нэртэй (GIVENNAME SURNAME, эс бөгөөс CN) яг тэнцүү байх ёстой — өөр
+  нэртэй дардас нэмсэн бол өмнөх гарын үсгүүд `modified_after_signing`. Гарын үсгийн revision-оос хойш xref-ийн мөр
+  өөрчлөгдөөгүй объект (ба түүний ObjStm) тэр revision дотор бүтнээрээ задрах ёстой (shadow attack — эс бөгөөс
+  `modified_after_signing`). `platform_attested` нэр зөвхөн өөрчлөгдөөгүй (эсвэл зөвхөн гарын үсгээр өргөтгөсөн) баримтад.
 - Цуцлалт (eID-ийн 04/05-ийн гэрчилгээнд): онлайн — AIA OCSP, эс бөгөөс CDP CRL (олгогчийн гарын үсэг, CertID); хариугүй
   эсвэл `Offline` бол баримтын DSS-ийн OCSP/CRL; нотолгоо шалгах цагт шинэлэг байх ёстой (PAdES LTV-ийн 24 цагийн дүрэм,
   RP-ийн OCSP шалгагчийн 48 цагийн дүрмээс тусдаа). Аль нь ч үгүй бол `revocation_unavailable` (indeterminate).
 - Алдаа (`EidPadesException.RawCode`): `PDF_TOO_LARGE` (> 10 MiB), `PDF_INVALID`, `PDF_ENCRYPTED` (/Encrypt — хоосон нууц
   үгтэй ч), `PDF_NO_SIGNATURE`, `PDF_TOO_MANY_SIGNATURES` (> 16), `REQUEST_INVALID` (Roots/Intermediates/Issuers задрахгүй).
-- Халдагчийн PDF-ийн хязгаар: задлахаас өмнө бүтцийн шалгалт (давхарлалт ≤ 256, ObjStm-ийн төсөв); revision-ийн задлагчид
-  рекурс ≤ 64, нийт ≤ 1 000 000 зангилаа, inflate ≤ 64 MiB, xref хэсэг ≤ 128, объектын дугаар < 2^23; FlateDecode тус бүр
-  ≤ 64 MiB; DSS-ийн stream ≤ 1 MiB (≤ 64 ширхэг); гинжийн угсралт ≤ 100 оролдлого; OCSP хариу ≤ 16 KiB, HTTP ≤ 4 MiB, 10 с.
-- Conformance: `testdata/pades-validate` = Go v0.31.0-ийн `pades/testdata/validate` (+ заасан golden файлууд)
-  (`./build/sync-validate.sh`, CI `validate-sync`); тохиолдол бүрийн тайланг Go-ийнхтэй deep-equal (`ValidatePdfCorpusTests`).
+- Халдагчийн PDF-ийн хязгаар (Go/TS-тэй ижил — хэтэрвэл `PDF_INVALID`): задлахаас өмнө бүтцийн шалгалт — давхарлалт ≤ 256;
+  xref хэсэг ≤ 128 (128-аас олон incremental update-тэй баримт `PDF_INVALID`); xref stream-ийн `/W` элемент бүр 0…8, мөрийн
+  урт > 0, `/Index` start + count ≤ 2^21, бүх xref stream-ийн мөр ≤ 2^21; xref stream / ObjStm-д ганц шүүлтүүр; задалсан xref
+  stream + ObjStm нийт ≤ 32 MiB; ObjStm-ийн гишүүн хайлтын ажил (толгойн хос × задалсан урт, нийлбэр) ≤ 1 GiB (маш олон
+  гишүүнтэй ObjStm `PDF_INVALID`). Гарын үсэг: CMS ба цагийн тэмдгийн токен бүрд ≤ 32 гэрчилгээ, RSA ≤ 8192 бит, e ≤ 2^32−1,
+  гэрчилгээ/TSTInfo-ийн serial ≤ 160 бит (утга) — хэтэрвэл тэр гарын үсэг `malformed_signature`; SHA-1/MD5/MD2-той SignerInfo
+  гарын үсгийн алгоритм `weak_algorithm`. DSS: stream ≤ 1 MiB (≤ 64 ширхэг), тайлсан нийт ≤ 8 MiB, давхар заасан stream-ийг нэг
+  удаа. .NET-ийн нэмэлт хамгаалалт (тайланд нөлөөгүй): revision-ийн задлагчид рекурс ≤ 64, нийт ≤ 1 000 000 зангилаа, inflate
+  ≤ 64 MiB, объектын дугаар < 2^23; уншигчид FlateDecode тус бүр ≤ 64 MiB, нэг нээлтэд нийт ≤ 256 MiB, рекурс ≤ 512; ObjStm-ийн
+  толгойг нэг удаа индексжүүлнэ; гинжийн угсралт ≤ 100 оролдлого; OCSP хариу ≤ 16 KiB, HTTP ≤ 4 MiB, 10 с.
+- Conformance: `testdata/pades-validate` = Go `222acbd`-ийн `pades/testdata/validate` (корпус v14, 80 тохиолдол; + заасан
+  golden файлууд) (`./build/sync-validate.sh`, CI `validate-sync`); тохиолдол бүрийн тайланг Go-ийнхтэй deep-equal
+  (`ValidatePdfCorpusTests`).
 
 ## Go / TS-тэй харьцуулсан дэмжлэг
 
