@@ -62,11 +62,11 @@ public class SignTests
         JsonAssert.Equivalent("""
             {"relyingPartyUUID":"rp-uuid","relyingPartyName":"Гэрээний систем","certificateLevel":"QUALIFIED",
              "signatureProtocol":"RAW_DIGEST_SIGNATURE",
-             "signatureProtocolParameters":{"digest":"DIGEST","signatureAlgorithm":"sha256WithRSAEncryption",
+             "signatureProtocolParameters":{"digest":"@D@","signatureAlgorithm":"sha256WithRSAEncryption",
                "signatureAlgorithmParameters":{"hashAlgorithm":"SHA-256"}},
              "interactions":"W3sidHlwZSI6ImRpc3BsYXlUZXh0QW5kUElOIiwiZGlzcGxheVRleHQ2MCI6ItCT0Y3RgNGN0Y3QvdC0INCz0LDRgNGL0L0g0q/RgdGN0LMg0LfRg9GA0LDRhSJ9XQ==",
              "initialCallbackUrl":"https://rp.example.mn/cb","fileName":"Гэрээ.pdf","onBehalfOf":"NTRMN-6235972"}
-            """.Replace("DIGEST", digest, StringComparison.Ordinal), h.Last.Json());
+            """.Replace("@D@", digest, StringComparison.Ordinal), h.Last.Json());
         Assert.Equal("0b8f3f0e-1111-4222-8333-444455556666", s.SessionId);
         Assert.Equal("tok_abc-123", s.SessionToken);
         Assert.Equal("12345", s.Vc);
