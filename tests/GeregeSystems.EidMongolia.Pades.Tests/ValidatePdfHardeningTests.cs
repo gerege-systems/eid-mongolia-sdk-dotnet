@@ -316,4 +316,45 @@ public class ValidatePdfHardeningTests
         // Хяналт: зөв нэртэй ижил бүтэц задарна.
         Assert.NotNull(ValCert.Parse(MakeCert(root.RawSubject, new byte[] { 7 }, root.RawSubject, root.Spki)));
     }
+
+    private static Task<PdfReport> ValidateCorpusInput(string name) =>
+        EidPades.ValidatePdfAsync(ValidatePdfCorpusTests.Read("validate/input/" + name + ".pdf"), new ValidatePdfOptions
+        {
+            Roots = ValidatePdfCorpusTests.Ders("roots"),
+            Issuers = ValidatePdfCorpusTests.Ders("issuers"),
+            Time = ValidatePdfCorpusTests.ManifestTime,
+            Offline = true,
+        });
+
+    /// <summary>
+    /// Corpus v15 (Go TestValidatePDFLaterStampNameNotCompared): own-signer дардасны /Name-ийг гэрчилгээний нэртэй
+    /// харьцуулахгүй — бүрэн бүтэн хожмын гарын үсгийн /Name (GOLDEN TESTOV) гэрчилгээнийхээс (QUALIFIED TESTOV) зөрсөн ч
+    /// өмнөх гарын үсэг valid, extended_by_signatures_only, visible_later_signature; signer_name гэрчилгээнээс.
+    /// </summary>
+    [Fact]
+    public async Task LaterStampName_NotComparedWithCertificate()
+    {
+        var rep = await ValidateCorpusInput("later-stamp-name-mismatch");
+        Assert.Equal(2, rep.Signatures.Count);
+        var first = rep.Signatures.Single(s => !s.CoversWholeDocument);
+        var later = rep.Signatures.Single(s => s.CoversWholeDocument);
+        Assert.Equal("valid", first.Indication);
+        Assert.Empty(first.Problems);
+        Assert.True(first.ExtendedBySignaturesOnly);
+        Assert.True(first.VisibleLaterSignature);
+        Assert.Equal(1, first.LaterSignatures);
+        Assert.True(later.Visible);
+        Assert.Equal("QUALIFIED TESTOV", later.SignerName);
+        Assert.Equal("GOLDEN TESTOV", later.ClaimedName);
+    }
+
+    /// <summary>Дүрмийн нөгөө хагас хэвээр: integrity-д унасан хожмын гарын үсэг өргөтгөл биш → өмнөх нь modified_after_signing.</summary>
+    [Fact]
+    public async Task LaterSignatureFailingIntegrity_StillModifiesEarlier()
+    {
+        var rep = await ValidateCorpusInput("later-sig-integrity-failed");
+        var first = rep.Signatures.First(s => !s.CoversWholeDocument);
+        Assert.Contains("modified_after_signing", first.Problems);
+        Assert.False(first.ExtendedBySignaturesOnly);
+    }
 }
