@@ -325,7 +325,7 @@ public sealed class EidLoginHandler
                 w.WriteString("qr", qr);
             }
             w.WriteNumber("expiresIn", expiresIn);
-        }, new("Set-Cookie", setCookie));
+        }, new KeyValuePair<string, string>("Set-Cookie", setCookie));
     }
 
     /// <summary>GET: PENDING (+шинэ QR, vc, expiresIn) | WAIT_CALLBACK | OK | FAILED | EXPIRED.</summary>
@@ -893,14 +893,14 @@ public sealed class EidLoginHandler
     // ---- хариу ----
 
     private EidLoginResponse Expired() =>
-        Json(200, w => w.WriteString("state", "EXPIRED"), new("Set-Cookie", ClearCookie));
+        Json(200, w => w.WriteString("state", "EXPIRED"), new KeyValuePair<string, string>("Set-Cookie", ClearCookie));
 
     private EidLoginResponse Failed(string code) =>
         Json(200, w =>
         {
             w.WriteString("state", "FAILED");
             w.WriteString("error", code);
-        }, new("Set-Cookie", ClearCookie));
+        }, new KeyValuePair<string, string>("Set-Cookie", ClearCookie));
 
     private EidLoginResponse Fail(string code) =>
         Redirect(FailTo(code), new List<KeyValuePair<string, string>> { new("Set-Cookie", ClearCookie) });
