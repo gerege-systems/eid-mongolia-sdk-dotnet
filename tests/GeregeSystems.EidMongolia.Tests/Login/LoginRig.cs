@@ -388,6 +388,8 @@ internal sealed class LoginEnv
         var o = new EidLoginOptions
         {
             Client = e.Client,
+            // Тестүүд «eid_login» нэрээр бичигдсэн (анхдагч нь rp-conformance/2-оос __Host-eid_login).
+            CookieName = "eid_login",
             CallbackUrl = CallbackUrl,
             FailureRedirect = "/login",
             TimeProvider = e.Time,

@@ -17,13 +17,13 @@ using Xunit;
 namespace GeregeSystems.EidMongolia.Tests;
 
 /// <summary>
-/// <c>testdata/conformance/eidlogin/scenarios.json</c> (eidlogin/1) — <see cref="EidLoginHandler"/>-ийг Go
+/// <c>testdata/conformance/eidlogin/scenarios.json</c> (eidlogin/2) — <see cref="EidLoginHandler"/>-ийг Go
 /// <c>eidlogin/conformance_test.go</c>-ийн harness-аар ажиллуулна. Формат ба matcher: corpus README §eidlogin.
 /// </summary>
 public class LoginConformanceTests
 {
     private const string File = "eidlogin/scenarios.json";
-    private const int ScenarioCount = 24;
+    private const int ScenarioCount = 34;
 
     public static IEnumerable<object[]> ScenarioNames() =>
         Corpus.Json(File).GetProperty("scenarios").EnumerateArray().Select(s => new object[] { s.GetProperty("name").GetString()! });
@@ -33,7 +33,7 @@ public class LoginConformanceTests
     {
         Assert.True(System.IO.File.Exists(Path.Combine(Corpus.Dir, File)), File + " алга");
         var f = Corpus.Json(File);
-        Assert.Equal("eidlogin/1", f.GetProperty("version").GetString());
+        Assert.Equal("eidlogin/2", f.GetProperty("version").GetString());
         var names = f.GetProperty("scenarios").EnumerateArray().Select(s => s.GetProperty("name").GetString()!).ToList();
         Assert.Equal(ScenarioCount, names.Count);
         Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
@@ -87,9 +87,13 @@ public class LoginConformanceTests
             PushFloor = TimeSpan.FromMilliseconds(Cn("pushFloorMs")),
             DisablePushFloor = Cn("pushFloorMs") == 0,
             CookieName = Cs("cookieName"),
+            CookieDomain = Cs("cookieDomain"),
+            CookiePath = Cs("cookiePath"),
             DisableRevocation = Cs("revocation") == "disabled",
             DisableDecoy = Cb("decoy", false),
-            ClientIp = EidLoginClientIp.RemoteAddress,
+            // clientIp "none" = IP-ийн эх үүсвэр огт тохируулахгүй; бусад үед хүсэлтийн ip (алга бол "" → start:unknown).
+            ClientIp = Cs("clientIp") == "none" ? null : EidLoginClientIp.RemoteAddress,
+            AuditKey = Cs("auditKeyHex") is { Length: > 0 } ak ? Convert.FromHexString(ak) : null,
             // Бодит цаг, гэхдээ хүлээлт (decoy poll) шууд дуусна (Go: h.sleep = no-op).
             TimeProvider = new SystemNowInstantTimers(),
             OnEvent = (ev, _) =>
@@ -98,6 +102,16 @@ public class LoginConformanceTests
                 return Task.CompletedTask;
             },
         };
+        if (cfg.TryGetValue("rateLimits", out var rl))
+        {
+            o.RateLimits = new Dictionary<string, EidLoginRateRule>(StringComparer.Ordinal);
+            foreach (var p in rl.EnumerateObject())
+            {
+                AssertKnownKeys(name, "config.rateLimits." + p.Name, p.Value, "max", "windowSeconds", "maxKeys");
+                int Num(string k) => p.Value.TryGetProperty(k, out var v) ? v.GetInt32() : 0;
+                o.RateLimits[p.Name] = new EidLoginRateRule { Max = Num("max"), Window = TimeSpan.FromSeconds(Num("windowSeconds")), MaxKeys = Num("maxKeys") };
+            }
+        }
         if (Cb("recordRateLimitKeys", true))
         {
             o.RateLimit = (k, _) =>
@@ -107,7 +121,11 @@ public class LoginConformanceTests
             };
         }
         var h = new EidLoginHandler(o);
-        var cookieName = Cs("cookieName");
+        // wireCookieName — хөтчийн харах нэр (cookieName "" = SDK-ийн анхдагч; README §eidlogin).
+        var cookieName = Cs("wireCookieName") is { Length: > 0 } wire ? wire : Cs("cookieName");
+        AssertKnownKeys(name, "config", JsonSerializer.SerializeToElement(cfg), "rpName", "rpUUID", "apiSecret", "callbackUrl", "successRedirect",
+            "failureRedirect", "ttlSeconds", "pollMs", "pushFloorMs", "cookieName", "wireCookieName", "cookieDomain", "cookiePath", "clientIp",
+            "auditKeyHex", "rateLimits", "revocation", "decoy", "recordRateLimitKeys");
 
         // Танихгүй түлхүүр = harness-ийн хоцрогдол: шинэ corpus түлхүүр хоосон (vacuous) PASS болохоос сэргийлж FAIL.
         AssertKnownKeys(name, "scenario", sc, "name", "comment", "config", "upstream", "steps", "events", "rateLimitKeys");
@@ -117,12 +135,12 @@ public class LoginConformanceTests
         {
             var st = steps[i];
             AssertKnownKeys(name, "алхам " + i, st, "comment", "request", "expect", "upstream", "repeat");
-            AssertKnownKeys(name, "алхам " + i + " request", st.GetProperty("request"), "method", "path", "headers", "json", "text", "cookieFrom", "ip");
+            AssertKnownKeys(name, "алхам " + i + " request", st.GetProperty("request"), "method", "path", "headers", "json", "text", "cookieFrom", "cookieHeader", "ip");
             var ex = st.GetProperty("expect");
             AssertKnownKeys(name, "алхам " + i + " expect", ex, "status", "json", "jsonKeys", "sameKeysAs", "location", "headers", "setCookie", "noSetCookie");
             if (ex.TryGetProperty("setCookie", out var exc))
             {
-                AssertKnownKeys(name, "алхам " + i + " expect.setCookie", exc, "value", "attributes", "cleared");
+                AssertKnownKeys(name, "алхам " + i + " expect.setCookie", exc, "value", "attributes", "absentAttributes", "cleared");
             }
             if (st.TryGetProperty("upstream", out var stu))
             {
@@ -156,7 +174,8 @@ public class LoginConformanceTests
                     var from = cf.GetInt32();
                     Assert.True(from >= 0 && from < i && results[from]?.Cookie is { } ck && ck.TryGetValue("", out _),
                         name + ": алхам " + i + ": cookieFrom " + from + " — тэр алхам " + cookieName + " cookie тавиагүй");
-                    headers["Cookie"] = cookieName + "=" + results[from].Cookie![""];
+                    var pair = cookieName + "=" + results[from].Cookie![""];
+                    headers["Cookie"] = Corpus.Opt(rq, "cookieHeader") is { } tmpl ? tmpl.Replace("$cookieFrom", pair, StringComparison.Ordinal) : pair;
                 }
                 var res = await h.HandleAsync(new EidLoginRequest
                 {
@@ -312,6 +331,16 @@ public class LoginConformanceTests
             if (sc.TryGetProperty("value", out var v) && Match(v, Value(res.Cookie.GetValueOrDefault("")), all) is { } ve)
             {
                 return "cookie value: " + ve;
+            }
+            if (sc.TryGetProperty("absentAttributes", out var absent))
+            {
+                foreach (var a in absent.EnumerateArray())
+                {
+                    if (res.Cookie.ContainsKey(a.GetString()!.ToLowerInvariant()))
+                    {
+                        return "cookie " + a.GetString() + " байх ёсгүй";
+                    }
+                }
             }
             if (sc.TryGetProperty("attributes", out var attrs))
             {

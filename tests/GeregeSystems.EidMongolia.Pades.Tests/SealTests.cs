@@ -432,6 +432,108 @@ public class SealTests
         return PlacementTests.Pdf(objs.ToArray());
     }
 
+    private const string QrDocId = "7a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d";
+
+    private static string QrMarker(string docId, int rev) =>
+        "/EIDVerify <</URL (https://ca.eidmongolia.mn/verify/" + docId + "/" + rev.ToString(CultureInfo.InvariantCulture) + ")>> BDC";
+
+    /// <summary>
+    /// CA-ийн тамганы бүртгэлийн хэлбэр ба файлын нотолгоо (Go seal_register_test.go <c>caAcceptsSealRegistration</c>-ийн
+    /// сүлжээгүй хэсэг): <see cref="GeregeSystems.EidMongolia.SealRegistration.Validate"/>, CMS = сүүлийн /Contents, hash-ууд.
+    /// </summary>
+    private static void CaAccepts(GeregeSystems.EidMongolia.SealRegistration? reg, byte[] input, Completed done, SealReservation? reserved)
+    {
+        Assert.NotNull(reg);
+        reg!.Validate();
+        Assert.Equal(done.Cms, reg.Cms);
+        Assert.Equal(Fixtures.Sha(input), reg.InSha256);
+        Assert.Equal(Fixtures.Sha(done.Pdf), reg.OutSha256);
+        Assert.Equal(done.SigRevSha256, reg.SigRevSha256);
+        Assert.Equal(done.DocId, reg.DocId);
+        Assert.Equal(done.RevIndex, reg.RevIndex);
+        var json = JsonSerializer.Serialize(reg);
+        foreach (var k in new[] { "medium", "sessionID", "pageSha256", "onBehalfOf", "signerEtsi", "priorRevisionSha256", "PriorSignatures" })
+            Assert.DoesNotContain("\"" + k + "\"", json, StringComparison.Ordinal);
+        if (reserved is not null)
+        {
+            // CA SEAL_DOC_MISMATCH: нөөц = бүртгэл.
+            Assert.Equal(reserved.DocId, reg.DocId);
+            Assert.Equal(reserved.RevIndex, reg.RevIndex);
+        }
+    }
+
+    // Go TestSealPDFRegistrationQRless.
+    [Fact]
+    public async Task SealRegistrationQrless()
+    {
+        var (seal, key) = Issue(X509KeyUsageFlags.NonRepudiation, "5EA1A1");
+        using var owned = key;
+        using var http = new HttpClient(new Pki(seal));
+        var o = SealOpts(seal) with { FileName = " Нэхэмжлэх.pdf " };
+        var calls = 0;
+        var done = await EidPades.SealAsync(Input(), o, (dtbs, reservation, _) =>
+        {
+            calls++;
+            Assert.Null(reservation); // QR-гүй тамга docId нөөцлөхгүй
+            return Task.FromResult(key.SignHash(dtbs, DSASignatureFormat.Rfc3279DerSequence));
+        }, Complete(http));
+        Assert.Equal(1, calls);
+        Assert.Equal("Нэхэмжлэх.pdf", done.SealRegistration!.FileName);
+        Assert.Null(done.SealRegistration.PriorCmsSha256);
+        CaAccepts(done.SealRegistration, Input(), done, null);
+        Assert.DoesNotContain("/EIDVerify", Encoding.Latin1.GetString(done.Pdf), StringComparison.Ordinal);
+        Assert.Equal(JsonSerializer.Serialize(done.SealRegistration), JsonSerializer.Serialize(EidPades.SealRegistration(done)));
+        // Хэт урт нэр → REQUEST_INVALID (CA cleanFileName ≤ 120).
+        var ex = await Assert.ThrowsAsync<EidPadesException>(() => EidPades.SealAsync(Input(), o with { FileName = new string('а', 121) },
+            (_, _) => throw new InvalidOperationException("дуудагдах ёсгүй"), Complete(http)));
+        Assert.Equal("REQUEST_INVALID", ex.RawCode);
+    }
+
+    // Go TestSealPDFRegistrationQR: нөөц (docId, revIndex) = дардасны QR = бүртгэлийн бие.
+    [Fact]
+    public async Task SealRegistrationQr()
+    {
+        var (seal, key) = Issue(X509KeyUsageFlags.NonRepudiation, "5EA1A2");
+        using var owned = key;
+        using var http = new HttpClient(new Pki(seal));
+        SealReservation? got = null;
+        var done = await EidPades.SealAsync(Input(), SealOpts(seal) with { Qr = true, DocId = QrDocId }, (dtbs, reservation, _) =>
+        {
+            got = reservation;
+            return Task.FromResult(key.SignHash(dtbs, DSASignatureFormat.Rfc3279DerSequence));
+        }, Complete(http));
+        Assert.Equal(new SealReservation(QrDocId, 1), got);
+        Assert.Equal(QrDocId, done.DocId);
+        Assert.NotNull(done.Placement);
+        Assert.Contains(QrMarker(QrDocId, 1), Encoding.Latin1.GetString(done.Pdf), StringComparison.Ordinal);
+        CaAccepts(done.SealRegistration, Input(), done, got);
+    }
+
+    // Go TestSealPDFRegistrationRejects: QR-д нөөцөлдөг delegate заавал, Invisible-тэй хамт болохгүй; SealRegistration — иргэн /
+    // docId-гүй бол REQUEST_INVALID. Бүгд гарын үсэг зурахаас өмнө.
+    [Fact]
+    public async Task SealRegistrationRejects()
+    {
+        var seal = RevocationTests.Cert("seal");
+        var o = new SealOptions { SealCert = seal.RawData, Chain = Chain(), SigningTime = SigningTime, Qr = true, DocId = QrDocId };
+        var ex = await Assert.ThrowsAsync<EidPadesException>(() => EidPades.SealAsync(Input(), o,
+            (_, _) => throw new InvalidOperationException("дуудагдах ёсгүй")));
+        Assert.Equal("REQUEST_INVALID", ex.RawCode);
+        ex = await Assert.ThrowsAsync<EidPadesException>(() => EidPades.SealAsync(Input(), o with { Invisible = true },
+            (_, _, _) => throw new InvalidOperationException("дуудагдах ёсгүй")));
+        Assert.Equal("REQUEST_INVALID", ex.RawCode);
+        // QR-гүй тамгатай (v12) баримт: verify хуудас, маркер алга, DocId өгөөгүй → QR тавих docId алга (автомат дардас ч).
+        var sealed12 = Fixtures.Read("output", "seal-visible.pdf");
+        ex = await Assert.ThrowsAsync<EidPadesException>(() => EidPades.SealAsync(sealed12, o with { DocId = null },
+            (_, _, _) => throw new InvalidOperationException("дуудагдах ёсгүй")));
+        Assert.Equal("REQUEST_INVALID", ex.RawCode);
+        // Иргэний Completed, docId-гүй Completed → SealRegistration REQUEST_INVALID.
+        Assert.Equal("REQUEST_INVALID", Assert.Throws<EidPadesException>(() =>
+            EidPades.SealRegistration(new Completed { DocId = QrDocId, SignerCert = RevocationTests.Cert("citizen").RawData })).RawCode);
+        Assert.Equal("REQUEST_INVALID", Assert.Throws<EidPadesException>(() =>
+            EidPades.SealRegistration(new Completed { SignerCert = seal.RawData })).RawCode);
+    }
+
     /// <summary>
     /// Өөрөө зурсан ECDSA P-256 гэрчилгээ (хувийн түлхүүргүй), өгсөн өргөтгөлүүдтэй (§6.1-ийн дүрмийг шалгах). CreateSelfSigned
     /// биш: түлхүүр холбохдоо .NET keyUsage-ийг өөрийн декодероор уншдаг бөгөөд 9-өөс хойших бит (bit 32)-ийг задалж чадахгүй.

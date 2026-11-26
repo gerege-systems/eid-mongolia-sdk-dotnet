@@ -75,6 +75,7 @@ public class LoginPkiTests
         {
             Client = client,
             CallbackUrl = CallbackUrl,
+            CookieName = "eid_login",
             FailureRedirect = "/login",
             DisplayText = (string)interactions[0]!["displayText60"]!,
             TimeProvider = clock,

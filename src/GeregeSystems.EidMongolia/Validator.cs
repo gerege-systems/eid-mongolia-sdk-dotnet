@@ -830,7 +830,11 @@ public sealed class ResponseValidator
         }
     }
 
-    /// <summary>AllowedIssuerSkis үед шууд issuer-ийн SKI (issuer-т алга бол leaf-ийн AKI) жагсаалтад байх ёстой.</summary>
+    /// <summary>
+    /// AllowedIssuerSkis үед шууд issuer-ийн түлхүүрийн танигч жагсаалтад байх ёстой (rp-conformance/2, Go validator.go
+    /// <c>checkIssuer</c>): issuer trust pool-оос олдвол ЗӨВХӨН түүний SKI, SKI extension-гүй бол RFC 5280 §4.2.1.2 арга 1
+    /// (SHA-1(subjectPublicKey BIT STRING)); leaf-ийн AKI-г зөвхөн issuer олдоогүй үед (AllowUntrusted) хэрэглэнэ.
+    /// </summary>
     private void CheckIssuer(ParsedCert leaf)
     {
         if (_allowedIssuers is null)
@@ -838,15 +842,19 @@ public sealed class ResponseValidator
             return;
         }
         var ski = leaf.AuthorityKeyId;
-        if (FindIssuer(leaf) is { SubjectKeyId: { Length: > 0 } s })
+        if (FindIssuer(leaf) is { } issuer)
         {
-            ski = s;
+            ski = IssuerKeyId(issuer);
         }
         if (ski is not { Length: > 0 } || !_allowedIssuers.Contains(Convert.ToHexString(ski).ToLowerInvariant()))
         {
             throw Invalid(ValidationReasons.IssuerNotAllowed, "гэрчилгээг гаргасан CA зөвшөөрөгдсөн иргэний issuer биш (allowedIssuerSkis)");
         }
     }
+
+    /// <summary>CA-ийн SubjectKeyId; extension алга бол RFC 5280 §4.2.1.2 арга 1: SHA-1(subjectPublicKey BIT STRING) (Go <c>issuerKeyID</c>).</summary>
+    internal static byte[] IssuerKeyId(ParsedCert c) =>
+        c.SubjectKeyId is { Length: > 0 } s ? s : SHA1.HashData(c.PublicKeyBits);
 
     /// <summary>leaf-ийн шууд issuer (revocation шалгагчид): intermediates, дараа нь anchors (Go <c>findIssuer</c>).</summary>
     internal ParsedCert? FindIssuer(ParsedCert leaf)

@@ -51,7 +51,11 @@ public sealed class EidLoginOptions
     /// <summary>Төлөвийн сан; null = <see cref="MemoryEidLoginStore"/>.</summary>
     public IEidLoginStore? Store { get; set; }
 
-    /// <summary>Cookie-ийн нэр (анхдагч <c>eid_login</c>).</summary>
+    /// <summary>
+    /// Cookie-ийн нэр. Анхдагч (rp-conformance/2): Secure, Domain алга, Path=/ үед <c>__Host-eid_login</c> (хөтөч дэд домэйн /
+    /// өөр замаас тарьсан cookie-г энэ нэрээр хүлээн авахгүй), бусад үед (InsecureCookie, CookieDomain, өөр CookiePath)
+    /// <c>eid_login</c>. Өгсөн нэрийг хэвээр хэрэглэнэ. Хүсэлтэд энэ нэртэй cookie нэгээс олон бол cookie-гүй гэж үзнэ.
+    /// </summary>
     public string? CookieName { get; set; }
 
     /// <summary>Cookie-ийн Path (анхдагч "/").</summary>
@@ -64,22 +68,24 @@ public sealed class EidLoginOptions
     public bool InsecureCookie { get; set; }
 
     /// <summary>
-    /// Төрөл тус бүрийн хязгаар ("start" — <c>start:&lt;ip&gt;</c>, "push" — <c>push:&lt;idCode&gt;</c>);
+    /// Төрөл тус бүрийн хязгаар ("start" — <c>start:&lt;ip&gt;</c>, "push" — <c>push:&lt;pushKey&gt;</c>);
     /// <see cref="EidLoginRateRule.Defaults"/>-тэй НЭГТГЭГДЭНЭ: өгсөн төрөл анхдагчийг дарна, өгөөгүй нь анхдагчаараа.
     /// Тухайн төрлийг хязгааргүй болгох бол <see cref="EidLoginRateRule.Unlimited"/>. Өөр түлхүүр → ArgumentException.
     /// </summary>
     public IDictionary<string, EidLoginRateRule>? RateLimits { get; set; }
 
     /// <summary>
-    /// Бүх түлхүүрт (<c>start:&lt;ip&gt;</c>, <c>push:&lt;idCode&gt;</c>) дуудагдах нэмэлт шалгалт; false → 429. Анхдагч
-    /// хязгаар ДЭЭР нэмэгдэнэ (хоёулаа зөвшөөрөх ёстой).
+    /// Бүх түлхүүрт (<c>start:&lt;ip&gt;</c>, <c>push:&lt;pushKey&gt;</c>) дуудагдах нэмэлт шалгалт; false → 429. Анхдагч
+    /// хязгаар ДЭЭР нэмэгдэнэ (хоёулаа зөвшөөрөх ёстой). rp-conformance/2-оос түлхүүрт регистрийн дугаар ОРОХГҮЙ: pushKey =
+    /// <see cref="OnEvent"/>-ийн meta.pushKey (<see cref="AuditKey"/>-ийн HMAC, 32 hex); IP тодорхойгүй бол <c>start:unknown</c>.
     /// </summary>
     public Func<string, CancellationToken, ValueTask<bool>>? RateLimit { get; set; }
 
     /// <summary>
     /// <c>start:&lt;ip&gt;</c> хязгаарын клиент IP: шууд холбогддог бол <see cref="EidLoginClientIp.RemoteAddress"/>,
     /// итгэмжит reverse proxy-ийн ард <see cref="EidLoginClientIp.Forwarded"/>(n), эсвэл өөрийн функц. null бол IP-ээр
-    /// хязгаарлахгүй (handler үүсэхэд нэг удаа Warning) — Go/TS-тэй ижил дүрэм; таамаглаж header-т итгэхгүй. Буцаасан IPv6
+    /// хязгаарлахгүй (handler үүсэхэд нэг удаа Warning) — Go/TS-тэй ижил дүрэм; таамаглаж header-т итгэхгүй. Өгсөн ч null /
+    /// "" буцаавал хязгааргүй биш — нийтийн <c>start:unknown</c> bucket. Буцаасан IPv6
     /// хаягийн түлхүүр нь /64 угтвар (<c>start:2001:db8:1:2::/64</c>); IPv4 хэвээр. ASP.NET Core-ийн <c>MapEidLogin</c>-д
     /// анхдагч нь <see cref="EidLoginClientIp.RemoteAddress"/>.
     /// </summary>

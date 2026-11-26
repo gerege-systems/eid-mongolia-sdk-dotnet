@@ -17,7 +17,7 @@ using Xunit;
 namespace GeregeSystems.EidMongolia.Tests;
 
 /// <summary>
-/// Cross-SDK conformance корпус (rp-conformance/1): Go reference-ийн <c>testdata/conformance</c>-ийн байт-ижил хуулбар
+/// Cross-SDK conformance корпус (rp-conformance/2): Go reference-ийн <c>testdata/conformance</c>-ийн байт-ижил хуулбар
 /// (<c>build/sync-conformance.sh</c>, CI <c>conformance-sync</c>). Формат: <c>testdata/conformance/README.md</c>.
 /// </summary>
 internal static class Corpus
@@ -113,7 +113,7 @@ public class ConformanceTests
     public void Manifest()
     {
         var m = Corpus.Json("manifest.json");
-        Assert.Equal("rp-conformance/1", m.GetProperty("version").GetString());
+        Assert.Equal("rp-conformance/2", m.GetProperty("version").GetString());
         var files = m.GetProperty("files").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal);
         Assert.NotEmpty(files);
         foreach (var (rel, sum) in files)
@@ -137,10 +137,10 @@ public class ConformanceTests
     [Fact]
     public void CaseCounts()
     {
-        // Корпус чимээгүй багасвал улаан (README: rp-validate 77, wire 26, OCSP 17).
-        Assert.Equal(77, Corpus.Names(RpValidate).Count());
+        // Корпус чимээгүй багасвал улаан (rp-conformance/2: rp-validate 88, wire 26, OCSP 24).
+        Assert.Equal(88, Corpus.Names(RpValidate).Count());
         Assert.Equal(26, Corpus.Names(WireFile).Count());
-        Assert.Equal(17, Corpus.Names(OcspFile).Count());
+        Assert.Equal(24, Corpus.Names(OcspFile).Count());
     }
 
     // ── interactions / acsp ──

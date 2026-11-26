@@ -190,6 +190,26 @@ PdfSignatureRegistered ok = await client.Pdf.RegisterSignatureAsync(new PdfSigna
   Completed stamped = await EidPades.SealAsync(pdf, new SealOptions { SealCert = cert.Certificate, Reason = "机构印章" },
       async (dtbs, ct) => (await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)).Signature, cancellationToken: ct);
   ```
+
+  **带 QR 的印章与 CA 登记**（CA V158，与 Go/TS 一致）：`SealOptions.Qr = true` 在印章外观中绘制
+  `https://ca.eidmongolia.mn/verify/<docId>/<revIndex>` QR；必须使用预留式委托（`SealReservation`）——只有实际绘制了 QR 印章时
+  才会传入预留，此时调用 `client.Seal.SealForDocumentAsync`。之后在 7 天内用 `client.Seal.RegisterSealedPdfAsync` 登记
+  `done.SealRegistration`（`/verify/{docId}` 上的机构行；201 → `Created`，相同请求体重试为 200；409 `PRIOR_MISMATCH` 时 SDK
+  自动尝试先前签名行的组合）。无 QR 的印章同样可以登记（只要 docId 已知，`done.SealRegistration` 就会被填充）。错误码：
+  `SealRegisterErrorCodes.All`（CA 顺序；`EidSealNotFoundException`、`EidSealDocMismatchException`、`EidDocIdReservedException`）。
+
+  ```csharp
+  Completed done = await EidPades.SealAsync(pdf, new SealOptions
+  {
+      SealCert = cert.Certificate,
+      Qr = true,                    // DocId = null：新文档随机生成；已签名文档取自验证页 / QR 印章
+      FileName = "发票.pdf",        // 在 /verify 上显示的名称（不写入 PDF）
+  }, async (dtbs, reservation, ct) => (reservation is null
+      ? await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)
+      : await client.Seal.SealForDocumentAsync(orgEtsi, dtbs, reservation.DocId, reservation.RevIndex, ct)).Signature,
+      cancellationToken: ct);
+  PdfSignatureRegistered reg = await client.Seal.RegisterSealedPdfAsync(orgEtsi, done.SealRegistration!, ct);
+  ```
 - **USB 令牌**——`client.Token.IssueCertificateAsync` / `PreviewCertificateAsync` / `CertificateResultAsync` /
   `CertificateInfoAsync`、`TokenService.VerifyTokenCertificates`，令牌认证 `AuthChallengeAsync` → 在令牌上签名 →
   `AuthVerifyAsync`（调用 CA 之前在本地核对摘要、签名和证书链）、`TokenService.TokenAuthDigest`。
@@ -241,7 +261,13 @@ app.MapEidLogin("/auth/eid", async (http, id) =>
 在 `MapEidLogin` 之前配置带 `KnownProxies` / `KnownNetworks` 的 `UseForwardedHeaders`，或 (b) 设置
 `o.ClientIp = EidLoginClientIp.Forwarded(n)`（n = 受信任代理的数量；取 `X-Forwarded-For` 从右数第 n 个值）。两者都不做时，
 所有用户共享代理那一个 IP 的限额；没有代理时切勿使用 `Forwarded(n)`（该请求头可被伪造）。IPv6 客户端按 /64 前缀计
-（`start:2001:db8:1:2::/64`）。
+（`start:2001:db8:1:2::/64`）；已配置 `ClientIp` 但 IP 未知时并非不限流，而是共享的 `start:unknown` 桶。push 的键为
+`push:<pushKey>`（`AuditKey` 的 HMAC，与 `OnEvent` 的 `meta.pushKey` 相同）——身份证号不会进入限流器或 `RateLimit` 钩子。内存限流器
+每类最多保存 `EidLoginRateRule.MaxKeys` 个键（默认 10 000）；表满时新键计入同一个共享的溢出桶（不会直接拒绝，也不会驱逐已有计数）。
+
+**Cookie。** 默认名称为 `__Host-eid_login`（Secure、无 `CookieDomain`、`CookiePath` = `/`——浏览器不会接受从兄弟主机植入的同名
+cookie）；设置了 `InsecureCookie`、`CookieDomain` 或其他 `CookiePath` 时为 `eid_login`；显式设置的 `CookieName` 原样使用。请求中
+该名称的 cookie 多于一个时视为没有登录 cookie（status → `EXPIRED`，callback → `eid_error=expired`）。
 
 安全性与 Go `eidlogin` / TS `createEidLogin` 一致：状态保存在服务器（`IEidLoginStore`；默认 `MemoryEidLoginStore`——单进程，
 最多 10 000 条；多实例部署时请在 `AddEidMongolia` 之前注册自己的 store，如 Redis），浏览器只拿到 HttpOnly + Secure +
@@ -249,7 +275,7 @@ SameSite=Lax cookie（`<sessionId>.<binding>`，binding 的 SHA-256 以恒定时
 限流（start：每个 IP 每 60 秒 20 次；push：每个号码每 60 秒 3 次），对未登记号码使用诱饵（decoy）会话 + push 1 秒下限，
 只有在 ValidateAuth + OCSP（**默认 soft-fail**，见上文“吊销”）之后才调用 `OnSuccess`（且只调用一次），审计用 `OnEvent`
 （以 HMAC pushKey 代替身份证号）。响应结构和 12 个错误码通过跨 SDK 语料 `testdata/conformance/eidlogin/scenarios.json`
-（24 个场景）校验。其他框架可直接调用 `EidLoginHandler`（`EidLoginRequest`——方法、URL、请求头、请求体、`RemoteIp`）。
+（34 个场景，eidlogin/2）校验。其他框架可直接调用 `EidLoginHandler`（`EidLoginRequest`——方法、URL、请求头、请求体、`RemoteIp`）。
 
 ## “我的 QR”——公民的“我的信息”（`GeregeSystems.EidMongolia.Qr`）
 
@@ -518,8 +544,9 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 | “使用 eID 登录”后端 | ✓（+ ASP.NET Core） | ✓（`net/http`） | ✓（+ `<eid-login-button>`） |
 | PAdES prepare / complete / suggestPlacement / 登记请求体 | ✓ | ✓ | ✓ |
 | 完整 PDF 验证器（`ValidatePDF`） | — | ✓ | ✓ |
-| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：验证器与 `Prepare` 的 docId） | —（golden v12） | ✓ v0.31.0 | ✓ 0.49.0 |
-| 印章登记（`POST /seal/{org}/registrations`） | — | — | — |
+| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：`SealAsync` 与 `Prepare` 的 docId） | ✓ main（验证器随 `ValidatePDF`） | ✓ v0.31.0 | ✓ 0.49.0 |
+| 印章登记（`POST /seal/{org}/registrations`）、`SealForDocument` | ✓ main | ✓ main | ✓ main |
+| 跨 SDK 语料 rp-conformance/2（验证器、OCSP、登录后端） | ✓ main | ✓ main | ✓ main |
 | `pdfDigest`、浏览器入口、`convert` | — | — | ✓（仅 TS） |
 
 ## 开发
@@ -537,7 +564,7 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
   对每个可见的 golden 用例运行 `SuggestPlacement`（逐个 `expect.suggestion` 字段，`suggestionError`）。
 - 字体（`Assets/`）：Noto Sans 子集，SIL OFL 1.1——与 Go 参考实现的 `pades/assets/fonts` 字节相同。
 - PDF 读写器沿用 digitorus/pdf（BSD-3）和 digitorus/pdfsign（BSD-2）的语义——许可证见 `Pdf/LICENSE.*`。
-- RP SDK：`testdata/conformance` = Go 仓库 `testdata/conformance`（rp-conformance/1）的字节一致副本
+- RP SDK：`testdata/conformance` = Go 仓库 `testdata/conformance`（rp-conformance/2）的字节一致副本
   （`./build/sync-conformance.sh`；CI `conformance-sync`）；测试 `tests/GeregeSystems.EidMongolia.Tests` 和
   `tests/GeregeSystems.EidMongolia.AspNetCore.Tests`（`net8.0` + `net10.0`）；`build/compat`——与 Pades 0.16.0 的二进制兼容性
   （CI `compat`）；`build/check-packages.sh`——三个包的元数据与依赖（CI `pack`）。

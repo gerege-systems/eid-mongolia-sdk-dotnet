@@ -19,9 +19,9 @@ namespace GeregeSystems.EidMongolia;
 // алга). GeregeSystems.EidMongolia.Pades-ийн дотоод Crypto/Ocsp.cs-тэй давхардсан — Pades core-оос хамаарах үед (0.17.0
 // lockstep release, docs/release-0.17.0.md) нэг дор нэгтгэнэ.
 //
-// Go/TS-ээс хатуу (.NET-ийн нэмэлт, cross-SDK review S5): (1) сүлжээнээс ӨМНӨ leaf-ийг өгсөн issuer гаргасан эсэхийг
+// rp-conformance/2 (Go/TS-тэй ижил; .NET 0.17.0-д анх нэмсэн): (1) кэш ба сүлжээнээс ӨМНӨ leaf-ийг өгсөн issuer гаргасан эсэхийг
 // (нэр, AKI/SKI, гарын үсэг) шалгана — үгүй бол no_issuer; (2) хариуны CertID-ийн issuerNameHash / issuerKeyHash-ийг
-// issuer-ийнхтэй тулгана — зөрвөл invalid.
+// issuer-ийнхтэй тулгана — зөрвөл invalid; (3) delegated responder-ийн сул RSA түлхүүр → signature.
 
 /// <summary><see cref="EidOcspException.Kind"/>-ийн утгууд (Go <c>OCSPErrorKind</c>; conformance корпусын <c>errorKind</c>).</summary>
 public static class OcspErrorKinds
@@ -185,8 +185,8 @@ public sealed class OcspRevocationChecker
         {
             throw Fail(new EidOcspException(OcspErrorKinds.NoIssuer, detail: e.Message, inner: e));
         }
-        // .NET-ийн нэмэлт: issuer энэ гэрчилгээг гаргаагүй бол responder-оос асуухгүй (Go/TS асуудаг).
-        if (!ResponseValidator.SignedBy(leaf, iss))
+        // rp-conformance/2 (Go ocsp.go issuedBy): кэш ба сүлжээнээс ӨМНӨ — issuer CA, RSA түлхүүр сул биш, leaf-ийг гаргасан.
+        if (!iss.IsCa || iss.WeakKey || !ResponseValidator.SignedBy(leaf, iss))
         {
             throw Fail(new EidOcspException(OcspErrorKinds.NoIssuer, detail: "өгсөн issuer энэ гэрчилгээг гаргаагүй"));
         }
@@ -383,12 +383,16 @@ public sealed class OcspRevocationChecker
             {
                 return (null, new EidOcspException(OcspErrorKinds.Signature, responder, detail: "responder-ийн гэрчилгээ хугацаандаа биш"));
             }
+            if (rc.WeakKey)
+            {
+                return (null, new EidOcspException(OcspErrorKinds.Signature, responder, detail: "responder-ийн RSA түлхүүр сул"));
+            }
         }
         if (resp.Serial != leaf.Serial)
         {
             return (null, new EidOcspException(OcspErrorKinds.Invalid, responder, detail: "хариу өөр serial-ийн тухай"));
         }
-        // .NET-ийн нэмэлт: serial-аар сонгосон хариуны CertID өөр олгогчийнх биш байх ёстой.
+        // rp-conformance/2: serial-тай бүх SingleResponse-ийн CertID issuer-ийнх байх ёстой.
         if (!CertIdMatches(resp, issuer))
         {
             return (null, new EidOcspException(OcspErrorKinds.Invalid, responder, detail: "хариуны CertID issuer-ийнхтэй таарахгүй"));
@@ -410,17 +414,28 @@ public sealed class OcspRevocationChecker
     /// </summary>
     internal static bool CertIdMatches(OcspParsed resp, ParsedCert issuer)
     {
-        Func<byte[], byte[]>? h = resp.HashOid switch
+        if (resp.SerialCertIds.Count == 0)
         {
-            "1.3.14.3.2.26" => SHA1.HashData,
-            "2.16.840.1.101.3.4.2.1" => SHA256.HashData,
-            "2.16.840.1.101.3.4.2.2" => SHA384.HashData,
-            "2.16.840.1.101.3.4.2.3" => SHA512.HashData,
-            _ => null,
-        };
-        return h is not null &&
-            CryptographicOperations.FixedTimeEquals(resp.IssuerNameHash, h(issuer.RawSubject)) &&
-            CryptographicOperations.FixedTimeEquals(resp.IssuerKeyHash, h(issuer.PublicKeyBits));
+            return false;
+        }
+        foreach (var (oid, nameHash, keyHash) in resp.SerialCertIds)
+        {
+            Func<byte[], byte[]>? h = oid switch
+            {
+                "1.3.14.3.2.26" => SHA1.HashData,
+                "2.16.840.1.101.3.4.2.1" => SHA256.HashData,
+                "2.16.840.1.101.3.4.2.2" => SHA384.HashData,
+                "2.16.840.1.101.3.4.2.3" => SHA512.HashData,
+                _ => null,
+            };
+            if (h is null ||
+                !CryptographicOperations.FixedTimeEquals(nameHash, h(issuer.RawSubject)) ||
+                !CryptographicOperations.FixedTimeEquals(keyHash, h(issuer.PublicKeyBits)))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -466,6 +481,12 @@ internal sealed class OcspParsed
     public string HashOid { get; init; } = "";
     public byte[] IssuerNameHash { get; init; } = Array.Empty<byte>();
     public byte[] IssuerKeyHash { get; init; } = Array.Empty<byte>();
+    /// <summary>
+    /// Сонгосон serial-тай БҮХ SingleResponse-ийн CertID (hashAlgorithm OID, issuerNameHash, issuerKeyHash) — rp-conformance/2:
+    /// бүгд issuer-тэй таарна (Go ocsp.go <c>ocspCertIDMatches</c>).
+    /// </summary>
+    public IReadOnlyList<(string HashOid, byte[] NameHash, byte[] KeyHash)> SerialCertIds { get; init; } =
+        Array.Empty<(string, byte[], byte[])>();
     public DateTimeOffset ThisUpdate { get; init; }
     public DateTimeOffset? NextUpdate { get; init; }
     /// <summary>certs[0] (delegated responder эсвэл issuer өөрөө); алга бол null.</summary>
@@ -669,6 +690,7 @@ internal static class OcspResponseParser
             HashOid = single.HashOid,
             IssuerNameHash = single.NameHash,
             IssuerKeyHash = single.KeyHash,
+            SerialCertIds = singles.Where(s => s.Serial == single.Serial).Select(s => (s.HashOid, s.NameHash, s.KeyHash)).ToList(),
             ThisUpdate = single.ThisUpdate,
             NextUpdate = single.NextUpdate,
             Certificate = embedded,

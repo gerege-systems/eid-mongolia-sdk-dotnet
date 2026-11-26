@@ -366,6 +366,33 @@ public sealed class EidSealGrantNotFoundException : EidApiException
     }
 }
 
+/// <summary>409 <c>SEAL_NOT_FOUND</c> — тамгалсан digest олдсонгүй (тамганы бүртгэл; <see cref="SealService.RegisterSealedPdfAsync"/>).</summary>
+public sealed class EidSealNotFoundException : EidApiException
+{
+    internal EidSealNotFoundException(int s, string b, string? c, string? sv, TimeSpan? r, HttpResponseHeaders? h)
+        : base(s, b, c, sv, r, h)
+    {
+    }
+}
+
+/// <summary>409 <c>SEAL_DOC_MISMATCH</c> — нөөцөлсөн docId/revIndex бүртгэлийнхтэй таарахгүй.</summary>
+public sealed class EidSealDocMismatchException : EidApiException
+{
+    internal EidSealDocMismatchException(int s, string b, string? c, string? sv, TimeSpan? r, HttpResponseHeaders? h)
+        : base(s, b, c, sv, r, h)
+    {
+    }
+}
+
+/// <summary>409 <c>DOC_ID_RESERVED</c> — docID-г өөр, бүртгэгдээгүй QR тамга нөөцөлсөн.</summary>
+public sealed class EidDocIdReservedException : EidApiException
+{
+    internal EidDocIdReservedException(int s, string b, string? c, string? sv, TimeSpan? r, HttpResponseHeaders? h)
+        : base(s, b, c, sv, r, h)
+    {
+    }
+}
+
 /// <summary>409 <c>RP_NOT_ACTIVE</c> — RP идэвхтэй биш.</summary>
 public sealed class EidRpNotActiveException : EidApiException
 {
@@ -673,6 +700,15 @@ public static class EidErrorCodes
     public const string RpPermissionsFull = "RP_PERMISSIONS_FULL";
     /// <summary>404: тамганы эрхийн хүсэлт олдсонгүй.</summary>
     public const string SealGrantNotFound = "SEAL_GRANT_NOT_FOUND";
+    /// <summary>
+    /// 409 (<c>POST /seal/{orgEtsi}/registrations</c>): энэ RP-ийн <c>POST /seal/{orgEtsi}</c>-ээр тамгалсан digest
+    /// (= SHA-256(signedAttrs)) олдсонгүй, өөр байгууллага/гэрчилгээ, эсвэл тамгалснаас 7 хоног өнгөрсөн.
+    /// </summary>
+    public const string SealNotFound = "SEAL_NOT_FOUND";
+    /// <summary>409 (тамганы бүртгэл): тамгалах үед нөөцөлсөн docId/revIndex бүртгэлийнхтэй таарахгүй.</summary>
+    public const string SealDocMismatch = "SEAL_DOC_MISMATCH";
+    /// <summary>409 (тамганы бүртгэл): docID-г өөр, бүртгэгдээгүй QR тамга бага байрлалд нөөцөлсөн (бүртгэгдсэний эсвэл 7 хоногийн дараа).</summary>
+    public const string DocIdReserved = "DOC_ID_RESERVED";
 
     /// <summary>Түр (давтаж болох) алдааны кодууд — <see cref="EidException.Retryable"/>.</summary>
     public static IReadOnlyList<string> RetryableCodes { get; } = new[] { RateLimited, StateUnavailable, IssuancePending };

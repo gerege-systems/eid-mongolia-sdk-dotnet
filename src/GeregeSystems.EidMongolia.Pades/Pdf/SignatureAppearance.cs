@@ -19,14 +19,16 @@ internal sealed class AppearanceException : Exception
 /// SignatureRevision.Prepare-ийн харагдах оролт: байршил (харагдах хуудасны орон зайд, h100) ба бичвэр. Page — 1-ээс,
 /// шийдэгдсэн (0 биш); Date — «YYYY-MM-DD HH:MM (+08)»; Url — https://ca.eidmongolia.mn/verify/&lt;docID&gt;/&lt;revIndex&gt;;
 /// Exact — <c>appearance.exact</c> (PLACEMENT_SPEC.md §6a): never moved, the scan only sets the status.
-/// Seal — байгууллагын тамганы дардас (APPEARANCE_SPEC.md §6): гарын үсэг зурагчийн гэрчилгээ e-Seal үед л (§6.1).
+/// Seal — байгууллагын тамганы дардас (APPEARANCE_SPEC.md §6): гарын үсэг зурагчийн гэрчилгээ e-Seal үед л (§6.1); Url-тэй
+/// бол QR-тэй тамга (§6.5), хоосон бол QR-гүй (§6.2).
 /// </summary>
 internal sealed record Visible(int Page, long X, long Y, long W, long H, string Name, string Role, string Lang, string Date, string Url, bool Exact = false,
     bool Seal = false);
 
 /// <summary>
 /// W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270. Seal — тамганы дардас
-/// (APPEARANCE_SPEC.md §6): QR/URL/үүрэг үгүй, SealLabels; Role, Url үл тооно.
+/// (APPEARANCE_SPEC.md §6): SealLabels, Role үл тооно. Url хоосон бол QR-гүй (§6.2), эс бөгөөс иргэний дардасны бүтэц
+/// (§3) — QR, /EIDVerify BDC — тамганы label-тай, үүргийн мөргүй (§6.5).
 /// </summary>
 internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url, bool Seal = false);
 
@@ -81,11 +83,18 @@ internal static class SignatureAppearance
 
     private sealed record Line(int Font, int Size, string Color, string Text);
 
-    /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3).</summary>
+    /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3; Seal бол §6.2 эсвэл §6.5 — Go core.AppearanceContent).</summary>
     public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld)
     {
-        if (p.Seal) return SealContent(p, reg, bld);
-        if (!Labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
+        if (p.Seal && p.Url == "") return SealContent(p, reg, bld);
+        var labels = Labels;
+        if (p.Seal)
+        {
+            // §6.5: иргэний дардас (§3) яг ижил — label = тамганых, үүргийн мөр хэзээ ч үгүй.
+            labels = SealLabels;
+            p = p with { Role = "" };
+        }
+        if (!labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
         if (!VerifyPage.AsciiUrl(p.Url)) throw new AppearanceException("URL ASCII биш");
         if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
         bool[][] m;

@@ -55,6 +55,13 @@ public sealed record PrepareOptions
 
     /// <summary>Харагдах гарын үсэг (APPEARANCE_SPEC.md). <c>null</c> = үл харагдах (анхдагч, өмнөхтэй байт-ижил).</summary>
     public Appearance? Appearance { get; init; }
+
+    /// <summary>
+    /// e-Seal гэрчилгээний дардсыг QR-тэй зурна (APPEARANCE_SPEC.md §6.5; Go <c>PrepareOptions.sealQR</c>). Нийтийн сонголт БИШ:
+    /// QR нь бүртгэлийг амладаг тул зөвхөн <c>EidPades.SealAsync</c> (<see cref="SealOptions.Qr"/> — docId/revIndex нөөц +
+    /// <see cref="Completed.SealRegistration"/>) ба golden/тест тавина.
+    /// </summary>
+    internal bool SealQr { get; init; }
 }
 
 /// <summary>
@@ -318,8 +325,15 @@ public sealed record Completed
     public string ClaimedRole { get; init; } = "";
 
     /// <summary>
-    /// Харагдах тамганы дардасны эцсийн байршил — зөвхөн <see cref="EidPades.SealAsync"/> бөглөнө; үл харагдах тамгад (мөн
+    /// Харагдах тамганы дардасны эцсийн байршил — зөвхөн <c>EidPades.SealAsync</c> бөглөнө; үл харагдах тамгад (мөн
     /// <see cref="EidPades.CompleteAsync"/>-д) <c>null</c>. Иргэний урсгалд <see cref="PreparedDocument.Placement"/>.
     /// </summary>
     public Placement? Placement { get; init; }
+
+    /// <summary>
+    /// CA-ийн тамганы бүртгэлийн (<c>POST /seal/{orgEtsi}/registrations</c>) бэлэн бие — зөвхөн <c>EidPades.SealAsync</c>
+    /// бөглөнө (Go <c>Completed.SealRegistration</c>); <see cref="DocId"/> хоосон бол <c>null</c> (гарын үсэгтэй, docId олдохгүй
+    /// баримт — <see cref="SealOptions.DocId"/>). <c>EidClient.Seal.RegisterSealedPdfAsync</c>-д өгнө.
+    /// </summary>
+    public SealRegistration? SealRegistration { get; init; }
 }

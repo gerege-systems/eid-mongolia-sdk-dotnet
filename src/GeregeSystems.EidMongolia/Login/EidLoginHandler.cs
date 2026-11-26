@@ -112,9 +112,11 @@ public sealed class EidLoginHandler
         _poll = options.Poll > TimeSpan.Zero ? options.Poll : TimeSpan.FromSeconds(1);
         _clock = options.TimeProvider ?? TimeProvider.System;
         _store = options.Store ?? new MemoryEidLoginStore(timeProvider: _clock);
-        _cookieName = string.IsNullOrEmpty(options.CookieName) ? "eid_login" : options.CookieName;
         _cookiePath = string.IsNullOrEmpty(options.CookiePath) ? "/" : options.CookiePath;
         _cookieDomain = string.IsNullOrEmpty(options.CookieDomain) ? null : options.CookieDomain;
+        // rp-conformance/2 (Go defaultCookieName): "__Host-" угтвар зөвхөн хөтөч хүлээн авах нөхцөлд (Secure, Domain алга, Path=/).
+        _cookieName = !string.IsNullOrEmpty(options.CookieName) ? options.CookieName
+            : !options.InsecureCookie && _cookieDomain is null && _cookiePath == "/" ? "__Host-eid_login" : "eid_login";
         if (!CookieNameRe.IsMatch(_cookieName) || !IsCookieAttr(_cookiePath) || (_cookieDomain is not null && !IsCookieAttr(_cookieDomain)))
         {
             throw new ArgumentException("eidlogin: CookieName / CookiePath / CookieDomain буруу", nameof(options));
@@ -230,11 +232,12 @@ public sealed class EidLoginHandler
             return Error(429, EidLoginErrors.RateLimited, ("Retry-After", "60"));
         }
 
-        if (_clientIp?.Invoke(request) is { Length: > 0 } ip && !await AllowAsync("start", RateKeyIp(ip), ct).ConfigureAwait(false))
+        if (_clientIp is not null && !await AllowAsync("start", StartKey(_clientIp(request)), ct).ConfigureAwait(false))
         {
             return await Limited().ConfigureAwait(false);
         }
-        if (mode == EidLoginModes.Push && !await AllowAsync("push", idCode, ct).ConfigureAwait(false))
+        // rp-conformance/2: push-ийн түлхүүр = audit HMAC (pushKey) — регистрийн дугаар хязгаарлагч / hook-д очихгүй.
+        if (mode == EidLoginModes.Push && !await AllowAsync("push", PushKey(idCode), ct).ConfigureAwait(false))
         {
             return await Limited().ConfigureAwait(false);
         }
@@ -1024,17 +1027,27 @@ public sealed class EidLoginHandler
         return "";
     }
 
-    private static string ReadCookie(string header, string name)
+    /// <summary>
+    /// Cookie header-ийг ";"-ээр хувааж (хэсэг бүрийг trim, нэр = эхний "="-ийн өмнөх) <paramref name="name"/>-тэй cookie ЯГ
+    /// НЭГ байвал түүний утга; алга эсвэл нэгээс олон (дэд домэйн / өөр замаас тарьсан cookie жинхэнийг сүүдэрлэх) бол ""
+    /// (rp-conformance/2, Go <c>singleCookie</c>, TS <c>readCookie</c>).
+    /// </summary>
+    internal static string ReadCookie(string header, string name)
     {
+        string value = "";
+        var n = 0;
         foreach (var part in header.Split(';'))
         {
-            var i = part.IndexOf('=');
-            if (i > 0 && part[..i].Trim() == name)
+            var p = part.Trim();
+            var i = p.IndexOf('=');
+            if (i < 0 || p[..i].Trim() != name)
             {
-                return part[(i + 1)..].Trim();
+                continue;
             }
+            value = p[(i + 1)..].Trim();
+            n++;
         }
-        return "";
+        return n == 1 ? value : "";
     }
 
     private static (string Path, string Query) SplitUrl(string url)
@@ -1160,12 +1173,39 @@ public sealed class EidLoginHandler
     }
 
     /// <summary>
-    /// <c>start:&lt;ip&gt;</c> хязгаарын түлхүүрийн IP: IPv6 бол /64 угтвар (<c>2001:db8:1:2::/64</c> — нэг клиент /64-ийн
-    /// дотор хаягаа сольж хязгаарыг тойрохгүй), IPv4-mapped IPv6 бол IPv4; IPv4 ба задрахгүй утга хэвээр.
+    /// <c>start:&lt;value&gt;</c>-ийн value (ClientIp өгсөн үед; Go <c>startKey</c>): хоосон (trim хийсэн) → <c>unknown</c>
+    /// (нийтийн bucket, fail-closed — «хязгааргүй» биш), бусад нь <see cref="RateKeyIp"/>.
+    /// </summary>
+    internal static string StartKey(string? ip)
+    {
+        var v = (ip ?? "").Trim();
+        return v.Length == 0 ? "unknown" : RateKeyIp(v);
+    }
+
+    /// <summary>
+    /// <c>start:&lt;ip&gt;</c> хязгаарын түлхүүрийн IP (Go <c>ipKey</c>): IPv6 литерал (<c>[…]</c>, <c>%zone</c> зөвшөөрнө, DNS
+    /// асуухгүй) бол /64 угтвар — эхний 4 hextet жижиг үсгээр, тэгийг хураахгүй, <c>::/64</c> залгана
+    /// (<c>2001:db8:1:2::/64</c>, <c>fe80:0:0:0::/64</c> — нэг клиент /64-ийн дотор хаягаа сольж хязгаарыг тойрохгүй);
+    /// IPv4-mapped IPv6 бол IPv4; IPv4 ба задрахгүй утга хэвээр.
     /// </summary>
     internal static string RateKeyIp(string ip)
     {
-        if (ip.IndexOf(':') < 0 || !IPAddress.TryParse(ip, out var a) || a.AddressFamily != AddressFamily.InterNetworkV6)
+        if (ip.IndexOf(':') < 0)
+        {
+            return ip;
+        }
+        var lit = ip;
+        if (lit.Length >= 2 && lit[0] == '[' && lit[^1] == ']')
+        {
+            lit = lit[1..^1];
+        }
+        var zone = lit.IndexOf('%');
+        if (zone >= 0)
+        {
+            lit = lit[..zone];
+        }
+        if (lit.IndexOfAny(new[] { '[', ']', '%', '/' }) >= 0 || !IPAddress.TryParse(lit, out var a) ||
+            a.AddressFamily != AddressFamily.InterNetworkV6)
         {
             return ip;
         }
@@ -1174,8 +1214,8 @@ public sealed class EidLoginHandler
             return a.MapToIPv4().ToString();
         }
         var b = a.GetAddressBytes();
-        Array.Clear(b, 8, 8);
-        return new IPAddress(b).ToString() + "/64";
+        return string.Format(CultureInfo.InvariantCulture, "{0:x}:{1:x}:{2:x}:{3:x}::/64",
+            (b[0] << 8) | b[1], (b[2] << 8) | b[3], (b[4] << 8) | b[5], (b[6] << 8) | b[7]);
     }
 
     /// <summary>idCode: бүх хоосон зайг хасаж том үсгээр (Go <c>strings.ToUpper(strings.Join(strings.Fields(..), ""))</c>).</summary>
@@ -1264,7 +1304,7 @@ public sealed class EidLoginHandler
                 {
                     throw new ArgumentException("eidlogin: RateLimits[\"" + k + "\"].Window > 0 байх ёстой", nameof(user));
                 }
-                var lim = new WindowLimiter(r.Max, r.Window, WindowLimiter.DefaultMaxKeys, clock);
+                var lim = new WindowLimiter(r.Max, r.Window, r.MaxKeys > 0 ? r.MaxKeys : WindowLimiter.DefaultMaxKeys, clock);
                 outp[k] = (key, _) => new ValueTask<bool>(lim.Allow(key));
             }
         }

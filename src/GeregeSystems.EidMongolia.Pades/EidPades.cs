@@ -97,22 +97,15 @@ public static partial class EidPades
 
         var inHex = PrepState.Hex(SHA256.HashData(pdf));
         var issuers = new List<X509Certificate2>(Trust.Issuers) { chain[0] };
-        var (newDoc, revIndex) = Prechecks.Run(pdf, issuers);
-        var docId = options.DocId ?? "";
+        var (newDoc, revIndex, seals) = Prechecks.Run(pdf, issuers);
+        bool seal = IsSealCertificate(cert);
+        // QR-тэй дардас: иргэний дардас (§3) эсвэл QR-тэй тамга (§6.5; Go drawsQR).
+        bool drawsQr = options.Appearance is not null && (!seal || options.SealQr);
+        var docId = ResolveDocId(pdf, newDoc, seals, options.DocId ?? "");
         byte[] baseBytes = pdf;
         string pageHex = "";
         bool hasPage = newDoc && options.VerifyPage;
         var fileName = CleanFileName(options.FileName ?? "");
-        if (!newDoc)
-        {
-            var fromPage = Prechecks.DocIdFromPage(pdf);
-            if (fromPage != "")
-            {
-                if (docId != "" && docId != fromPage) throw new EidPadesException("REQUEST_INVALID", "docId does not match the document page");
-                docId = fromPage;
-            }
-        }
-        if (newDoc && docId == "") docId = RandUuid();
         if (hasPage)
         {
             if (fileName is null) throw new EidPadesException("REQUEST_INVALID", "fileName is required, ≤ 120 characters");
@@ -129,8 +122,8 @@ public static partial class EidPades
         }
         var name = options.SignerName;
         if (string.IsNullOrWhiteSpace(name) || GoText.TrimSpace(name) == "") name = SignerDisplayName(cert);
-        // APPEARANCE_SPEC.md §6.1: e-Seal гэрчилгээ → байгууллагын тамганы дардас; бусад нь иргэний дардас (өмнөхтэй байт-ижил).
-        var vis = options.Appearance is null ? null : VisibleSpec(pdf, options, name, now, docId, revIndex, IsSealCertificate(cert));
+        // APPEARANCE_SPEC.md §6.1: e-Seal гэрчилгээ → байгууллагын тамганы дардас (QR-тэй бол §6.5); бусад нь иргэний дардас.
+        var vis = options.Appearance is null ? null : VisibleSpec(pdf, options, name, now, docId, revIndex, seal, drawsQr);
         PreparedRevision prep;
         try
         {
@@ -429,12 +422,13 @@ public static partial class EidPades
 
     /// <summary>
     /// Go visibleSpec: хуудас (0 → eID verify биш сүүлийн, PLACEMENT_SPEC §1a), h100, хэл, огноо (+08), verify URL. seal (гарын
-    /// үсэг зурагчийн гэрчилгээ e-Seal) бол тамганы дардас (APPEARANCE_SPEC.md §6): URL/QR үгүй тул docId шаардахгүй.
+    /// үсэг зурагчийн гэрчилгээ e-Seal) бол тамганы дардас (APPEARANCE_SPEC.md §6): qr бол QR-тэй (§6.5), эс бөгөөс URL-гүй
+    /// (§6.2). qr бол docId заавал (verify хуудас, маркертай дардас, opts.docId-ийн аль нь ч алга → REQUEST_INVALID).
     /// </summary>
-    private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex, bool seal)
+    private static Visible VisibleSpec(byte[] doc, PrepareOptions o, string name, DateTimeOffset now, string docId, int revIndex, bool seal, bool qr)
     {
         var a = o.Appearance!;
-        if (docId == "" && !seal) throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас алга)");
+        if (docId == "" && qr) throw new EidPadesException("REQUEST_INVALID", "appearance: docId заавал (баримтад verify хуудас, QR дардас алга)");
         // page 0 / байхгүй = eID verify хуудас БИШ сүүлийн хуудас (PLACEMENT_SPEC §1a); тодорхой дугаар хэвээр.
         int n, last;
         try
@@ -452,7 +446,33 @@ public static partial class EidPades
         return new Visible(page, SignatureAppearance.Round100(a.X), SignatureAppearance.Round100(a.Y), SignatureAppearance.Round100(a.Width),
             SignatureAppearance.Round100(a.Height), GoText.TrimSpace(name), o.ClaimedRole ?? "", lang,
             now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " (+08)",
-            PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture), a.Exact, seal);
+            qr ? PageVerifyUrl + docId + "/" + revIndex.ToString(CultureInfo.InvariantCulture) : "", a.Exact, seal);
+    }
+
+    /// <summary>
+    /// Prepare-ийн docId (APPEARANCE_SPEC.md §6.6; Go <c>resolveDocID</c>). Гарын үсэггүй: opts.docId, эс бөгөөс санамсаргүй.
+    /// Гарын үсэгтэй: (1) verify хуудасны холбоос; (2) эс бөгөөс шалгасан e-Seal гарын үсгийн хамгийн эрт зурсан /EIDVerify
+    /// тэмдэгтэй дардасных; олдсонтой opts.docId зөрвөл REQUEST_INVALID; (3) эс бөгөөс opts.docId (хоосон байж болно — QR зурах
+    /// бол VisibleSpec REQUEST_INVALID). Гарын үсэгтэй баримтад санамсаргүй docId ҮҮСГЭХГҮЙ.
+    /// </summary>
+    private static string ResolveDocId(byte[] doc, bool newDoc, Dictionary<uint, int> seals, string given)
+    {
+        if (newDoc) return given != "" ? given : RandUuid();
+        var found = Prechecks.DocIdFromPage(doc);
+        if (found == "")
+        {
+            try
+            {
+                found = Prechecks.DocIdFromStamps(doc, seals);
+            }
+            catch (Exception e) when (Prechecks.IsParseError(e))
+            {
+                throw new EidPadesException("PDF_INVALID", "PDF задарсангүй (гарын үсгийн дардас)", e);
+            }
+        }
+        if (found != "" && given != "" && given != found)
+            throw new EidPadesException("REQUEST_INVALID", "docId нь баримтын verify хуудас / дардас дээрхтэй таарахгүй");
+        return found != "" ? found : given;
     }
 
     /// <summary>DTBS дээрх гарын үсгийг шалгаж CMS-д бичих хэлбэрээр (RSA хэвээр, ECDSA DER) буцаана; таарахгүй бол null.</summary>

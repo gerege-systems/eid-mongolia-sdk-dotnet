@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Formats.Asn1;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
 using GeregeSystems.EidMongolia.Pades.Crypto;
 using GeregeSystems.EidMongolia.Pades.Pdf;
 
@@ -16,8 +18,11 @@ internal static class Prechecks
 
     internal sealed record SigDict(uint Obj, long[]? ByteRange, string SubFilter, string Type, string ContentsRaw);
 
-    /// <summary>(шинэ баримт эсэх, энэ гарын үсгийн revIndex). Алдаа бол EidPadesException.</summary>
-    public static (bool NewDoc, int RevIndex) Run(byte[] doc, IReadOnlyList<X509Certificate2> issuers)
+    /// <summary>
+    /// (шинэ баримт эсэх, энэ гарын үсгийн revIndex, шалгасан e-Seal гарын үсгүүд — Sig толины объектын дугаар → байрлал;
+    /// APPEARANCE_SPEC.md §6.6 <see cref="DocIdFromStamps"/>). Алдаа бол EidPadesException (Go precheck).
+    /// </summary>
+    public static (bool NewDoc, int RevIndex, Dictionary<uint, int> Seals) Run(byte[] doc, IReadOnlyList<X509Certificate2> issuers)
     {
         if (Encrypted(doc)) throw new EidPadesException("PDF_ENCRYPTED", "encrypted PDF is not supported");
         List<SigDict> sigs;
@@ -30,7 +35,7 @@ internal static class Prechecks
         {
             throw new EidPadesException("PDF_INVALID", "not a PDF or damaged", e);
         }
-        if (sigs.Count == 0) return (true, 1);
+        if (sigs.Count == 0) return (true, 1, new Dictionary<uint, int>());
         if (sigs.Count >= EidPades.MaxSignatures) throw new EidPadesException("PDF_TOO_MANY_SIGNATURES", "too many signatures");
         var leaves = new X509Certificate2[sigs.Count];
         var stamped = new bool[sigs.Count];
@@ -51,7 +56,27 @@ internal static class Prechecks
             if (sigs[i].SubFilter != "ETSI.CAdES.detached" || !IssuedByAny(leaves[i], issuers) || !stamped[i] || !hasDss)
                 throw new EidPadesException("PDF_FOREIGN_SIGNATURE", "document carries a signature that is not an eID signature");
         }
-        return (false, sigs.Count + 1);
+        return (false, sigs.Count + 1, StampSources(sigs, leaves));
+    }
+
+    /// <summary>
+    /// APPEARANCE_SPEC.md §6.6 алхам 2.2-ийн эх (Go <c>stampSources</c>): шалгасан гарын үсгүүдээс ЗӨВХӨН e-Seal гэрчилгээтэй нь,
+    /// Sig толины объектын дугаар → байрлал (1 + ByteRange[2]+[3] нь бага шалгасан гарын үсгийн тоо). Иргэний гарын үсэг хэзээ
+    /// ч docId-ийн эх болохгүй.
+    /// </summary>
+    private static Dictionary<uint, int> StampSources(List<SigDict> sigs, X509Certificate2[] leaves)
+    {
+        var output = new Dictionary<uint, int>();
+        for (int i = 0; i < sigs.Count; i++)
+        {
+            if (!EidPades.IsSealCertificate(leaves[i])) continue;
+            var s = sigs[i].ByteRange!;
+            int rev = 1;
+            foreach (var o in sigs)
+                if (o.ByteRange![2] + o.ByteRange[3] < s[2] + s[3]) rev++;
+            output[sigs[i].Obj] = rev;
+        }
+        return output;
     }
 
     internal static bool IsParseError(Exception e) =>
@@ -194,5 +219,98 @@ internal static class Prechecks
         {
         }
         return "";
+    }
+
+    /// <summary>QR-тэй дардасны form stream-ийн эхний мөр (APPEARANCE_SPEC.md §5 алхам 6; Go <c>stampMarkerRe</c>): docId = 1-р бүлэг.</summary>
+    private static readonly Regex StampMarker = new(
+        @"^/EIDVerify <</URL \(https://ca\.eidmongolia\.mn/verify/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/([1-9][0-9]?)\)>> BDC\n",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>Маркерын мөрийн дээд урт (байт) — form stream-ээс уншина (Go <c>stampMarkerMax</c>).</summary>
+    private const int StampMarkerMax = 128;
+
+    /// <summary>
+    /// Prepare-ийн docId дүрмийн 2.2-р алхам (APPEARANCE_SPEC.md §6.6; Go verify.go <c>docIDFromStamps</c>): шалгасан e-Seal
+    /// гарын үсгүүдийн (<paramref name="seals"/> — Sig толины объектын дугаар → байрлал) хамгийн ЭРТ зурсан, /EIDVerify
+    /// тэмдэгтэй дардасны docId. Widget = сүүлийн revision-ий xref-ийн толь, ӨӨРИЙН <c>/FT /Sig</c>, ӨӨРИЙН <c>/V</c> нь seals-ийн
+    /// аль нэг толь руу ШУУД БУС лавлагаа. (1) e-Seal гарын үсэг бүрийн widget-ийг тоолно (/V-г resolve хийхгүй); (2) яг НЭГ
+    /// widget-тэй гарын үсгийн дардсыг л уншина. <c>/AP</c> → толь, <c>/N</c> → stream, <c>/Filter</c> алга эсвэл ШУУД null;
+    /// stream-ийн эхний ≤ 128 байт маркераар эхэлж, маркерын rev = тэр гарын үсгийн байрлал. Хамгийн бага ByteRange[2] +
+    /// ByteRange[3] (тэнцвэл объектын дугаар бага). Алга → "". Ганц widget-тэй нэр дэвшигчийн уншилт бүтэлгүйтвэл алдаа
+    /// (дуудагч PDF_INVALID); бусад уншигдахгүй объектыг алгасна.
+    /// </summary>
+    public static string DocIdFromStamps(byte[] doc, IReadOnlyDictionary<uint, int> seals)
+    {
+        if (seals.Count == 0) return "";
+        var r = PdfDocument.Open(doc);
+        var xr = r.Xref;
+        var widgets = new Dictionary<uint, int>();
+        var first = new Dictionary<uint, int>();
+        for (int i = 0; i < xr.Count; i++)
+        {
+            var xp = xr[i].Ptr;
+            PdfValue v;
+            try
+            {
+                v = r.Resolve(xp, xp);
+            }
+            catch (Exception e) when (IsParseError(e))
+            {
+                continue;
+            }
+            // /V — ШУУД БУС лавлагаа (түүхий утга; resolve хийхгүй), xref-д бүртгэлтэй (дугаар + үе) e-Seal гарын үсэг рүү.
+            if (v.Data is not PdfDict d || d.GetValueOrDefault("V") is not ObjPtr sp) continue;
+            uint obj = sp.Id;
+            if (!seals.ContainsKey(obj) || obj >= (uint)xr.Count || xr[(int)obj].Ptr != sp) continue;
+            string ft;
+            try
+            {
+                ft = v.Key("FT").Name;
+            }
+            catch (Exception e) when (IsParseError(e))
+            {
+                continue;
+            }
+            if (ft != "Sig") continue;
+            widgets[obj] = widgets.GetValueOrDefault(obj) + 1;
+            if (widgets[obj] == 1) first[obj] = i;
+        }
+        string id = "";
+        long best = long.MaxValue;
+        uint bestObj = 0;
+        foreach (var (obj, n) in widgets)
+        {
+            if (n != 1) continue;
+            var (docId, end) = ReadStamp(r, xr[first[obj]].Ptr, xr[(int)obj].Ptr, seals[obj]);
+            if (docId == "" || end < 0) continue;
+            if (end < best || end == best && obj < bestObj)
+            {
+                (best, bestObj, id) = (end, obj, docId);
+            }
+        }
+        return id;
+    }
+
+    /// <summary>Ганц widget-тэй e-Seal гарын үсгийн дардасны маркерын docId ба ByteRange[2]+[3] (буруу бол -1; Go <c>readStamp</c>).</summary>
+    private static (string DocId, long End) ReadStamp(PdfDocument r, ObjPtr widget, ObjPtr sig, int rev)
+    {
+        var w = r.Resolve(default, widget);
+        var s = r.Resolve(default, sig);
+        long end = -1;
+        var br = s.Key("ByteRange");
+        if (br.Len == 4 && br.Index(2).Kind == PdfKind.Integer && br.Index(3).Kind == PdfKind.Integer)
+            end = br.Index(2).Int64 + br.Index(3).Int64;
+        var ap = w.Key("AP");
+        var n = ap.Key("N");
+        if (ap.Kind != PdfKind.Dict || n.Kind != PdfKind.Stream) return ("", end);
+        // /Filter: алга эсвэл ШУУД null л; шууд бус лавлагааны утга нь заасан объектын ptr-тэй, шууд утга нь stream-ийнхтэй.
+        var f = n.Key("Filter");
+        if (!f.IsNull || f.Ptr != n.Ptr) return ("", end);
+        _ = n.Key("DecodeParms");
+        var raw = n.RawStreamBytes();
+        var head = Latin1.FromBytes(raw[..Math.Min(raw.Length, StampMarkerMax)]);
+        var m = StampMarker.Match(head);
+        if (m.Success && m.Groups[2].Value == rev.ToString(CultureInfo.InvariantCulture)) return (m.Groups[1].Value, end);
+        return ("", end);
     }
 }
