@@ -32,9 +32,9 @@ validator, OCSP, wire, login backend) шалгадаг.
 [nuget.org](https://www.nuget.org/profiles/geregecore)-оос:
 
 ```bash
-dotnet add package GeregeSystems.EidMongolia --version 0.17.0             # RP SDK
-dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.17.0  # ASP.NET Core-д (core-ийг дагуулна)
-dotnet add package GeregeSystems.EidMongolia.Pades --version 0.17.0       # client-side PAdES (core-ийг дагуулна)
+dotnet add package GeregeSystems.EidMongolia --version 0.18.0             # RP SDK
+dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.18.0  # ASP.NET Core-д (core-ийг дагуулна)
+dotnet add package GeregeSystems.EidMongolia.Pades --version 0.18.0       # client-side PAdES (core-ийг дагуулна)
 ```
 
 Хувилбар бүрийн `.nupkg` (+ `.snupkg` symbols) [GitHub Releases](https://github.com/gerege-systems/eid-mongolia-sdk-dotnet/releases)-д
@@ -583,7 +583,7 @@ string json = rep.ToJson();
 
 ## Go / TS-тэй харьцуулсан дэмжлэг
 
-| Боломж | .NET 0.17.0 | Go | TS |
+| Боломж | .NET 0.18.0 | Go | TS |
 |---|---|---|---|
 | Client, алдаа, замын хүснэгт, discovery | ✓ | ✓ | ✓ |
 | Нэвтрэлт: push, device link (QR / Web2App / App2App), QR ticker | ✓ | ✓ | ✓ |
@@ -599,9 +599,9 @@ string json = rep.ToJson();
 | «eID-ээр нэвтрэх» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / бүртгэлийн бие | ✓ | ✓ | ✓ |
 | PDF-ийн бүрэн шалгагч (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
-| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч, `SealAsync` ба `Prepare`-ийн docId) | ✓ main | ✓ v0.31.0 | ✓ 0.49.0 |
-| Тамганы бүртгэл (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ main | ✓ main | ✓ main |
-| Cross-SDK корпус rp-conformance/2 (validator, OCSP, нэвтрэлтийн backend) | ✓ main | ✓ main | ✓ main |
+| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч, `SealAsync` ба `Prepare`-ийн docId) | ✓ | ✓ v0.31.0 | ✓ 0.49.0 |
+| Тамганы бүртгэл (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ | ✓ main | ✓ main |
+| Cross-SDK корпус rp-conformance/2 (validator, OCSP, нэвтрэлтийн backend) | ✓ | ✓ main | ✓ main |
 | `pdfDigest`, хөтчийн entry, `convert` | — | — | ✓ (TS-д л) |
 
 ## Хөгжүүлэлт

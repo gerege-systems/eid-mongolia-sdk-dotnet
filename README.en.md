@@ -34,9 +34,9 @@ Full documentation: <https://developer.eidmongolia.mn/#overview>.
 From [nuget.org](https://www.nuget.org/profiles/geregecore):
 
 ```bash
-dotnet add package GeregeSystems.EidMongolia --version 0.17.0             # RP SDK
-dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.17.0  # for ASP.NET Core (brings core)
-dotnet add package GeregeSystems.EidMongolia.Pades --version 0.17.0       # client-side PAdES (brings core)
+dotnet add package GeregeSystems.EidMongolia --version 0.18.0             # RP SDK
+dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.18.0  # for ASP.NET Core (brings core)
+dotnet add package GeregeSystems.EidMongolia.Pades --version 0.18.0       # client-side PAdES (brings core)
 ```
 
 The `.nupkg` (+ `.snupkg` symbols) of each release is also available on
@@ -593,7 +593,7 @@ string json = rep.ToJson();
 
 ## Support compared with Go / TS
 
-| Feature | .NET 0.17.0 | Go | TS |
+| Feature | .NET 0.18.0 | Go | TS |
 |---|---|---|---|
 | Client, errors, route table, discovery | ✓ | ✓ | ✓ |
 | Authentication: push, device link (QR / Web2App / App2App), QR ticker | ✓ | ✓ | ✓ |
@@ -609,9 +609,9 @@ string json = rep.ToJson();
 | «Sign in with eID» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / registration body | ✓ | ✓ | ✓ |
 | Full PDF validator (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
-| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator, `SealAsync` and `Prepare` docId) | ✓ main | ✓ v0.31.0 | ✓ 0.49.0 |
-| Seal registration (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ main | ✓ main | ✓ main |
-| Cross-SDK corpus rp-conformance/2 (validator, OCSP, login backend) | ✓ main | ✓ main | ✓ main |
+| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator, `SealAsync` and `Prepare` docId) | ✓ | ✓ v0.31.0 | ✓ 0.49.0 |
+| Seal registration (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ | ✓ main | ✓ main |
+| Cross-SDK corpus rp-conformance/2 (validator, OCSP, login backend) | ✓ | ✓ main | ✓ main |
 | `pdfDigest`, browser entry, `convert` | — | — | ✓ (TS only) |
 
 ## Development
