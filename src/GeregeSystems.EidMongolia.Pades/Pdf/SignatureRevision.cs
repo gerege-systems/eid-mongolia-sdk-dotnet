@@ -88,7 +88,8 @@ internal static class SignatureRevision
             // nothing is free.
             placed = StampPlacement.Choose(page, box, rot, vis.X, vis.Y, vis.W, vis.H, vis.Exact);
             if (placed.Status == PlacementStatus.Moved) rect = SignatureAppearance.Rect(box, rot, placed.X, placed.Y, vis.W, vis.H);
-            var bodies = SignatureAppearance.Objects(new AppearanceParams(vis.W, vis.H, rot, vis.Name, vis.Role, vis.Lang, vis.Date, vis.Url, vis.Seal), apIds);
+            var bodies = SignatureAppearance.Objects(new AppearanceParams(vis.W, vis.H, rot, vis.Name, vis.Role, vis.Lang, vis.Date, vis.Url, vis.Seal), apIds,
+                sealQr: vis.Seal && vis.Url != "");
             inc.WriteObject(fieldId, SignatureAppearance.Widget(fieldName, rect, page.Ptr.Id, page.Ptr.Gen, sigId, apIds[0]));
             for (int i = 0; i < bodies.Length; i++) inc.WriteObject(apIds[i], bodies[i]);
         }

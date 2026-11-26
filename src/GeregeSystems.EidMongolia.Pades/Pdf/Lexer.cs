@@ -283,7 +283,29 @@ internal sealed class Lexer
         return ndot == 1;
     }
 
+    /// <summary>
+    /// ReadObject / ReadArray / ReadDict-ийн рекурсын дээд гүн. Structure.Check (≤ 256) нь эхний хамгаалалт; энэ нь түүнийг
+    /// тойрсон (ObjStm-ийн агуулга г.м.) замд StackOverflow-ийн оронд PdfFormatException (PDF_INVALID) өгнө.
+    /// </summary>
+    internal const int MaxDepth = 512;
+
+    private int _depth;
+
     public object? ReadObject()
+    {
+        if (_depth >= MaxDepth) throw new PdfFormatException("PDF nesting too deep");
+        _depth++;
+        try
+        {
+            return ReadObjectCore();
+        }
+        finally
+        {
+            _depth--;
+        }
+    }
+
+    private object? ReadObjectCore()
     {
         var tok = ReadToken();
         if (tok is PdfKeyword kw)

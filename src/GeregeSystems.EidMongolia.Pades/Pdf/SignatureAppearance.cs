@@ -27,8 +27,8 @@ internal sealed record Visible(int Page, long X, long Y, long W, long H, string 
 
 /// <summary>
 /// W, H — харагдах (эргүүлэлтийн дараах) өргөн, өндөр, h100; Rotate — 0 | 90 | 180 | 270. Seal — тамганы дардас
-/// (APPEARANCE_SPEC.md §6): SealLabels, Role үл тооно. Url хоосон бол QR-гүй (§6.2), эс бөгөөс иргэний дардасны бүтэц
-/// (§3) — QR, /EIDVerify BDC — тамганы label-тай, үүргийн мөргүй (§6.5).
+/// (APPEARANCE_SPEC.md §6): SealLabels, Role үл тооно. <c>Content(…, sealQr)</c>-ийн sealQr үгүй бол QR-гүй (§6.2), эс бөгөөс
+/// иргэний дардасны бүтэц (§3) — QR, /EIDVerify BDC — тамганы label-тай, үүргийн мөргүй (§6.5).
 /// </summary>
 internal sealed record AppearanceParams(long W, long H, int Rotate, string Name, string Role, string Lang, string Date, string Url, bool Seal = false);
 
@@ -83,18 +83,17 @@ internal static class SignatureAppearance
 
     private sealed record Line(int Font, int Size, string Color, string Text);
 
-    /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3; Seal бол §6.2 эсвэл §6.5 — Go core.AppearanceContent).</summary>
-    public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld)
+    /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3).</summary>
+    /// <remarks>
+    /// sealQr — QR-тэй тамганы дардас (APPEARANCE_SPEC.md §6.5: иргэний дардасны бүтэц, тамганы шошго, үүргийн мөргүй; Go
+    /// core.AppearanceContent: Seal + URL). Бичигч (SignatureRevision, golden v13) ба ValidatePdf (OwnAppearance) хоёулаа
+    /// <c>Seal &amp;&amp; Url != ""</c> үед тавина; эс бөгөөс Seal бол QR-гүй тамга (§6.2).
+    /// </remarks>
+    public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld, bool sealQr = false)
     {
-        if (p.Seal && p.Url == "") return SealContent(p, reg, bld);
-        var labels = Labels;
-        if (p.Seal)
-        {
-            // §6.5: иргэний дардас (§3) яг ижил — label = тамганых, үүргийн мөр хэзээ ч үгүй.
-            labels = SealLabels;
-            p = p with { Role = "" };
-        }
-        if (!labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
+        if (p.Seal && !sealQr) return SealContent(p, reg, bld);
+        if (p.Seal) p = p with { Role = "" };
+        if (!(p.Seal ? SealLabels : Labels).TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
         if (!VerifyPage.AsciiUrl(p.Url)) throw new AppearanceException("URL ASCII биш");
         if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
         bool[][] m;
@@ -215,12 +214,12 @@ internal static class SignatureAppearance
     }
 
     /// <summary>/AP /N form XObject ба түүний 2 фонт (11 объект): ids = [form, F1 ×5, F2 ×5]. Буцаах нь объектын бие.</summary>
-    public static byte[][] Objects(AppearanceParams p, uint[] ids)
+    public static byte[][] Objects(AppearanceParams p, uint[] ids, bool sealQr = false)
     {
         var reg = PageFont.Regular.Value;
         var bld = PageFont.Bold.Value;
         var (_, bw, bh) = Rotation(p.Rotate, p.W, p.H);
-        var content = Content(p, reg, bld);
+        var content = Content(p, reg, bld, sealQr);
         var o = new List<byte[]>(ids.Length)
         {
             VerifyPage.StreamObj(" /Type /XObject /Subtype /Form /BBox [0 0 " + Num100(bw) + " " + Num100(bh) + "] /Resources << /Font << /F1 " +
