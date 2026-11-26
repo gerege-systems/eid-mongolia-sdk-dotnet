@@ -865,7 +865,7 @@ internal static class Extract
                 // TSTInfo serialNumber ≤ 160 бит (Go extract.go: timestamp.Parse-ийн дараа, цаг/serial тавихаас өмнө).
                 if (IntBitLength(sv) > MaxSerialBits) return o;
                 serial = GoFmt.HexSerial(sv);
-                time =GoTime.FromPrecise(Asn1.ParsePreciseTime(Asn1.Expect(Asn1.At(info, 4), Asn1.GeneralizedTime, "genTime")));
+                time = GoTime.FromPrecise(Asn1.ParsePreciseTime(Asn1.Expect(Asn1.At(info, 4), Asn1.GeneralizedTime, "genTime")));
             }
             catch (Exception e) when (IsParse(e))
             {
