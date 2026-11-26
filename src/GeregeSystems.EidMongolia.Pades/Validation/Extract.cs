@@ -248,7 +248,11 @@ internal static class Extract
             known[s.ObjNum] = s.ByteRange!;
             metas[s.ObjNum] = new SigMeta
             {
-                RevIndex = 1, Role = "", RoleOk = s.ClaimedRoles.Count <= 1, Seal = ValCert.SealCertificateDer(s.Leaf), Name = CertDisplayName(s.Leaf),
+                RevIndex = 1,
+                Role = "",
+                RoleOk = s.ClaimedRoles.Count <= 1,
+                Seal = ValCert.SealCertificateDer(s.Leaf),
+                Name = CertDisplayName(s.Leaf),
             };
         }
         foreach (var kv in metas)
