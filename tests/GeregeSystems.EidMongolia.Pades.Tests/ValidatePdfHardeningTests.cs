@@ -169,11 +169,115 @@ public class ValidatePdfHardeningTests
     [Fact]
     public void ManyEmbeddedCertificates_Rejected()
     {
+        // Go boundedCerts: > 32 гэрчилгээ → гарын үсэг malformed (задлал өөрөө амжилттай — цагийн тэмдгийн токенд TSTInfo тайланд орно).
         var root = RootDer();
         var (iss, sn) = IssuerSerial(root);
-        Assert.NotNull(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 32), iss, sn)));
-        Assert.Null(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 33), iss, sn)));
-        Assert.Null(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 5000), iss, sn)));
+        Assert.True(Extract.BoundedCerts(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 32), iss, sn))!.Certs));
+        Assert.False(Extract.BoundedCerts(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 33), iss, sn))!.Certs));
+        Assert.False(Extract.BoundedCerts(Extract.ParsePkcs7(SignedData(Enumerable.Repeat(root, 5000), iss, sn))!.Certs));
+    }
+
+    private static byte[] RsaSpki(byte[] n, byte[] e) =>
+        Asn1.Tlv(Asn1.Sequence, Asn1.Tlv(Asn1.Sequence, Asn1.OidTlv(ValCert.OidRsaEncryption), Asn1.Tlv(0x05)),
+            Asn1.Tlv(Asn1.BitString, new byte[] { 0 }.Concat(Asn1.Tlv(Asn1.Sequence, Asn1.Tlv(Asn1.Integer, n), Asn1.Tlv(Asn1.Integer, e))).ToArray()));
+
+    /// <summary>2^(bits−1)-ийн эерэг INTEGER агуулга (DER-ийн хамгийн богино хэлбэр).</summary>
+    private static byte[] Pow2(int bits)
+    {
+        int k = bits - 1;
+        var a = new byte[k / 8 + 1];
+        a[0] = (byte)(1 << (k % 8));
+        return k % 8 == 7 ? new byte[] { 0 }.Concat(a).ToArray() : a;
+    }
+
+    [Theory]
+    [InlineData(160, 8192, 4, true)]
+    [InlineData(161, 8192, 4, false)] // serial > 160 бит (RFC 5280 «≤ 20 octets», утгын хэмжээ)
+    [InlineData(160, 8200, 4, false)] // RSA модуль > 8192 бит
+    [InlineData(160, 2048, 5, false)] // илтгэгч 2^32 > 2^32−1
+    public void BoundedCert_SerialAndRsaLimits(int serialBits, int modulusBits, int exponentBytes, bool ok)
+    {
+        var root = ValCert.Parse(RootDer());
+        var e = new byte[exponentBytes];
+        e[0] = 1;
+        var c = ValCert.Parse(MakeCert(root.RawSubject, Pow2(serialBits), root.RawSubject, RsaSpki(Pow2(modulusBits), e)));
+        Assert.Equal((long)serialBits, Extract.IntBitLength(c.Serial));
+        Assert.Equal(ok, Extract.BoundedCert(c));
+    }
+
+    [Fact]
+    public void WeakSignatureAlgorithms_GoList()
+    {
+        Assert.Equal(
+            new[] { "1.2.840.10040.4.3", "1.2.840.10045.4.1", "1.2.840.113549.1.1.2", "1.2.840.113549.1.1.4", "1.2.840.113549.1.1.5", "1.3.14.3.2.29" },
+            Extract.WeakSignatureOids.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.DoesNotContain(ValCert.OidSha256WithRsa, Extract.WeakSignatureOids);
+        Assert.DoesNotContain(ValCert.OidEcdsaSha256, Extract.WeakSignatureOids);
+    }
+
+    // ── Go CheckStructure v14: xref хэсэг, xref stream /W /Index, ObjStm-ийн ажил ──
+
+    /// <summary>Зөвхөн нэг xref stream-ийн толь (бүтцийн шалгалтад; уншигч нээхгүй байж болно).</summary>
+    private static byte[] XrefDict(string dict) => L("%PDF-1.5\n1 0 obj\n<< /Type /XRef " + dict + " /Length 0 >>\nstream\n\nendstream\nendobj\n%%EOF\n");
+
+    [Theory]
+    [InlineData("/Size 5 /W [1 2 1] /Index [0 5]", false)]
+    [InlineData("/Size 5 /W [0 0 0] /Index [0 1000000000]", true)] // мөрийн урт 0
+    [InlineData("/Size 5 /W [1 9 1]", true)] // /W-ийн элемент > 8
+    [InlineData("/Size 5 /W [1 -1 1]", true)]
+    [InlineData("/Size 5 /W [1 2 1] /Index [0 2097152]", false)] // 2^21 — хил
+    [InlineData("/Size 5 /W [1 2 1] /Index [0 2097153]", true)]
+    [InlineData("/Size 5 /W [1 2 1] /Index [2097150 3]", true)] // start + count > 2^21
+    [InlineData("/Size 5 /W [1 2 1] /Index [-1 3]", true)]
+    [InlineData("/Size 5 /W [1 2 1] /Index [0 1048576 1048576 1048577]", true)] // мөрийн нийлбэр > 2^21
+    [InlineData("/Size 5 /W [1 2 1] /Filter [/FlateDecode /FlateDecode]", true)] // xref stream-д олон шүүлтүүр
+    [InlineData("/Size 5 /W [0 0 0 2]", false)] // нийлбэр > 0
+    [InlineData("/Size 5 /W [1 2 1.5]", false)] // бүхэл биш — уншигч өөрөө татгалзана
+    public void XrefStream_WAndIndex(string dict, bool bad)
+    {
+        var doc = XrefDict(dict);
+        if (bad) Assert.Throws<PdfStructureException>(() => Structure.Check(doc));
+        else Structure.Check(doc);
+    }
+
+    [Theory]
+    [InlineData(128, false)]
+    [InlineData(129, true)]
+    public void XrefSections_Max128(int n, bool bad)
+    {
+        var doc = L("%PDF-1.4\n" + string.Concat(Enumerable.Repeat("trailer\n<< /Size 1 >>\n", n)) + "%%EOF\n");
+        if (bad) Assert.Throws<PdfStructureException>(() => Structure.Check(doc));
+        else Structure.Check(doc);
+    }
+
+    [Theory]
+    [InlineData(1000, false)]
+    [InlineData(20000, true)] // 20000 хос × 80000 байт > 1 GiB
+    public void ObjStmWork_Budget(int members, bool bad)
+    {
+        var header = string.Concat(Enumerable.Repeat("1 0 ", members));
+        var doc = L($"%PDF-1.5\n4 0 obj\n<< /Type /ObjStm /N {members} /First 0 /Length {header.Length} >>\nstream\n{header}\nendstream\nendobj\n%%EOF\n");
+        if (bad) Assert.Throws<PdfStructureException>(() => Structure.Check(doc));
+        else Structure.Check(doc);
+    }
+
+    [Fact]
+    public void ObjStmIndex_FirstMatchWins()
+    {
+        // Толгойг нэг удаа индексжүүлнэ — давхардсан дугаарт эхнийх (өмнөх давталттай ижил).
+        var doc = XrefStreamPdf("", L("3 0 3 11 << /A 1 >> << /B 2 >>"), 9, n: "2");
+        var r = PdfDocument.Open(doc);
+        var p = new ObjPtr(3, 0);
+        Assert.Equal(1L, r.Resolve(p, p).Key("A").Int64);
+        Assert.True(r.Resolve(p, p).Key("B").IsNull);
+    }
+
+    [Fact]
+    public void Reader_XrefStreamZeroRowWidth()
+    {
+        var doc = XrefStreamPdf("", L("3 0 << >>"), 4);
+        var bad = Encoding.Latin1.GetString(doc).Replace("/W [1 4 1]", "/W [0 0 0]", StringComparison.Ordinal);
+        Assert.Throws<PdfFormatException>(() => PdfDocument.Open(L(bad)));
     }
 
     private static byte[] MakeCert(byte[] issuer, byte[] serialContent, byte[] subject, byte[] spki)

@@ -19,10 +19,17 @@ internal sealed class PdfDocument
     /// <summary>Нэг баримт нээх бүрийн нийт FlateDecode тайлалтын төсөв (xref stream, ObjStm, DSS — бүгд хамт).</summary>
     internal const long MaxDocInflate = 256L << 20;
 
-    /// <summary>xref /Prev гинжийн дээд урт (TS/Go validate-ийн MAX_XREF_SECTIONS-тэй ижил).</summary>
-    private const int MaxXrefSections = 128;
+    /// <summary>xref хэсгийн дээд тоо (startxref-ийн хэсэг + /Prev гинж; TS reader MAX_XREF_SECTIONS, Go maxXrefSections).</summary>
+    private const int MaxXrefSections = Structure.MaxXrefSections;
+
+    /// <summary>xref stream-ийн мөрийн нийт тоо: max(/Size, 2^21) (TS reader MAX_XREF_ROWS, Go maxXrefSize).</summary>
+    private const long MaxXrefRows = 1 << 21;
 
     private long _inflateLeft = MaxDocInflate;
+    private long _xrefRows;
+
+    /// <summary>ObjStm бүрийн задалсан өгөгдөл ба толгойн индекс (гишүүн бүрд толгойг эхнээс нь дахин уншихгүй).</summary>
+    private readonly Dictionary<ObjPtr, ObjStmIndex> _objStms = new();
 
     private readonly byte[] _f;
     private readonly Dictionary<ObjPtr, object?> _cache = new();
@@ -131,7 +138,7 @@ internal sealed class PdfDocument
         {
             if (prevoff is not long off) throw new PdfFormatException("malformed PDF: xref Prev is not integer");
             if (!seen.Add(off)) throw new PdfFormatException("malformed PDF: xref Prev loop detected");
-            if (seen.Count > MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
+            if (seen.Count >= MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
             if (off < 0 || off >= _f.Length) throw new PdfFormatException("malformed PDF: xref Prev out of range");
             if (new Lexer(_f, (int)off, _f.Length).ReadObject() is not ObjDef { Obj: PdfStream prev })
                 throw new PdfFormatException("malformed PDF: xref prev stream not found");
@@ -163,6 +170,17 @@ internal sealed class PdfDocument
         if (w.Count < 3) throw new PdfFormatException("invalid W array");
         int wtotal = 0;
         foreach (var x in w) wtotal += x;
+        // /W [0 0 0] — мөр бүр 0 байт: том /Index-ээр хязгааргүй давталт (TS reader, Go precheck xrefStm).
+        if (wtotal <= 0) throw new PdfFormatException("xref stream: zero row width");
+        long maxRows = Math.Max(size, MaxXrefRows);
+        for (int k = 0; k + 1 < index.Count; k += 2)
+        {
+            if (index[k + 1] is long cnt && cnt > 0)
+            {
+                _xrefRows += Math.Min(cnt, maxRows + 1);
+                if (_xrefRows > maxRows) throw new PdfFormatException("xref stream: too many entries");
+            }
+        }
 
         var data = StreamBytes(new PdfValue(this, default, strm), strm, structural: true);
         int p = 0;
@@ -217,7 +235,7 @@ internal sealed class PdfDocument
         {
             if (prevoff is not long off) throw new PdfFormatException("malformed PDF: xref Prev is not integer");
             if (!seen.Add(off)) throw new PdfFormatException("malformed PDF: xref Prev loop detected");
-            if (seen.Count > MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
+            if (seen.Count >= MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
             if (off < 0 || off >= _f.Length) throw new PdfFormatException("malformed PDF: xref Prev out of range");
             var pb = new Lexer(_f, (int)off, _f.Length);
             if (pb.ReadToken() is not PdfKeyword { Value: "xref" })
@@ -308,23 +326,21 @@ internal sealed class PdfDocument
             long first = strm.Key("First").Int64;
             if (first == 0) throw new PdfFormatException("missing First");
             if (strm.Data is not PdfStream objStm) throw new PdfFormatException("not a stream");
-            var data = StreamBytes(strm, objStm, structural: true);
-            var b = new Lexer(data, 0, data.Length) { AllowEof = true };
-            for (long i = 0; i < n; i++)
+            // Толгойг нэг л удаа (хэрэгтэй хүртлээ) уншиж индекслэнэ (TS reader ObjStmIndex) — гишүүн бүрд толгойг эхнээс нь
+            // уншвал n гишүүнтэй ObjStm-д O(n × өгөгдөл). Утга нь өмнөх давталттай ижил: эхний таарсан хос, бүхэл биш id/off → 0,
+            // /N эсвэл EOF хүртэл; толгойн алдаа зөвхөн тэр хүртэл олдоогүй гишүүнд.
+            if (!_objStms.TryGetValue(objStm.Ptr, out var ix))
             {
-                // TS reader: /N нь stream-ээс урт бол үлдсэн мөр байхгүй — EOF дээр зогсоно (/N 2147483647 → 2^31 давталт биш).
-                var idTok = b.ReadToken();
-                var offTok = b.ReadToken();
-                if (idTok == Lexer.Eof || offTok == Lexer.Eof) break;
-                long id = idTok is long a ? a : 0;
-                long off = offTok is long o ? o : 0;
-                if ((uint)id == ptr.Id)
-                {
-                    long at = first + off;
-                    if (at < 0 || at > data.Length) throw new PdfFormatException("object stream offset out of range");
-                    b.SeekForward((int)at);
-                    return b.ReadObject();
-                }
+                ix = new ObjStmIndex(StreamBytes(strm, objStm, structural: true), n);
+                if (objStm.Ptr != default) _objStms[objStm.Ptr] = ix;
+            }
+            if (ix.Lookup(ptr.Id) is { } off)
+            {
+                long at = first + off;
+                if (at < 0 || at > ix.Data.Length) throw new PdfFormatException("object stream offset out of range");
+                var b = new Lexer(ix.Data, 0, ix.Data.Length) { AllowEof = true };
+                b.SeekForward((int)at);
+                return b.ReadObject();
             }
             var ext = strm.Key("Extends");
             if (ext.Kind != PdfKind.Stream) throw new PdfFormatException("cannot find object in stream");
@@ -412,5 +428,60 @@ internal sealed class PdfDocument
         }
         if (inflated.Length % row != 0) throw new PdfFormatException("PNG-Up: partial row");
         return outMs.ToArray();
+    }
+}
+
+/// <summary>
+/// Нэг ObjStm-ийн задалсан өгөгдөл ба толгойн «дугаар offset» хосын индекс — хэрэгтэй хүртлээ л уншина (TS reader ObjStmIndex).
+/// Толгойн лексерийн алдаа нь тэр байрлалаас хойшхи хосыг хайсан lookup бүрд дахин шидэгдэнэ (өмнөх давталттай ижил).
+/// </summary>
+internal sealed class ObjStmIndex
+{
+    private readonly Lexer _lx;
+    private readonly long _n;
+    private readonly Dictionary<uint, long> _offs = new();
+    private long _read;
+    private bool _done;
+    private System.Runtime.ExceptionServices.ExceptionDispatchInfo? _err;
+
+    public ObjStmIndex(byte[] data, long n)
+    {
+        Data = data;
+        _n = n;
+        _lx = new Lexer(data, 0, data.Length) { AllowEof = true };
+    }
+
+    public byte[] Data { get; }
+
+    /// <summary>id-ийн эхний таарсан offset; толгойд алга бол null.</summary>
+    public long? Lookup(uint id)
+    {
+        if (_offs.TryGetValue(id, out var hit)) return hit;
+        _err?.Throw();
+        while (!_done && _read < _n)
+        {
+            object? idTok, offTok;
+            try
+            {
+                idTok = _lx.ReadToken();
+                offTok = _lx.ReadToken();
+            }
+            catch (Exception e) when (e is not OutOfMemoryException and not OperationCanceledException)
+            {
+                _err = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e);
+                throw;
+            }
+            _read++;
+            if (idTok == Lexer.Eof || offTok == Lexer.Eof)
+            {
+                _done = true; // /N нь stream-ээс урт — үлдсэн мөр байхгүй
+                break;
+            }
+            uint idn = idTok is long a ? (uint)a : 0;
+            long o = offTok is long b ? b : 0;
+            _offs.TryAdd(idn, o);
+            if (idn == id) return o;
+        }
+        return null;
     }
 }

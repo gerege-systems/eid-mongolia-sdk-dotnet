@@ -400,7 +400,7 @@ All errors are `EidPadesException`; branch on the (stable) `Code`, `Message` is 
 
 | `Code` | Wire code | Meaning |
 |---|---|---|
-| `PdfInvalid` | `PDF_INVALID` | The PDF cannot be parsed; structure too deep (nesting > 256) or an ObjStm cycle, `/Extends` > 64, `/Size` > 2^21 (PRECHECKS #2a/#2b) |
+| `PdfInvalid` | `PDF_INVALID` | The PDF cannot be parsed; structure too deep (nesting > 256) or an ObjStm cycle, `/Extends` > 64, `/Size` > 2^21, > 128 xref sections, xref stream `/W` `/Index` limits, ObjStm work > 1 GiB (PRECHECKS #2a/#2b) |
 | `PdfEncrypted` | `PDF_ENCRYPTED` | Encrypted PDF |
 | `PdfLocked` | `PDF_LOCKED` | DocMDP P=1 — modification forbidden |
 | `PdfTooLarge` | `PDF_TOO_LARGE` | Larger than 9.75 MiB (input) / 10 MiB (output) |
@@ -566,16 +566,30 @@ string json = rep.ToJson();
 - Changes after signing: every later revision is compared as a parsed object graph (the CA public validator's rules) — only
   added signatures/DSS give `extended_by_signatures_only`; visible signatures and organisation seal stamps (with/without QR,
   APPEARANCE_SPEC §5/§6) are regenerated with the writer's code and compared; anything else is `modified_after_signing`.
+  Only later signatures that pass integrity count as signature-only extensions; a visible stamp's `/Name` must equal that
+  signature's certificate name (GIVENNAME SURNAME, else CN) — a stamp with a different name makes the earlier signatures
+  `modified_after_signing`. Every object whose xref entry is unchanged since the signed revision (and its object stream) must
+  parse completely inside that revision (shadow attack — otherwise `modified_after_signing`). `platform_attested` names are
+  shown only for unmodified (or signature-only extended) documents.
 - Revocation (certificates issued by eID 04/05): online — AIA OCSP, else CDP CRL (issuer signature, CertID); no answer or
   `Offline` → the document's DSS OCSP/CRL; evidence must be fresh at the validation time (the PAdES LTV 24 h rule, separate
   from the RP OCSP checker's 48 h rule). None → `revocation_unavailable` (indeterminate).
 - Errors (`EidPadesException.RawCode`): `PDF_TOO_LARGE` (> 10 MiB), `PDF_INVALID`, `PDF_ENCRYPTED` (/Encrypt — even with an
   empty password), `PDF_NO_SIGNATURE`, `PDF_TOO_MANY_SIGNATURES` (> 16), `REQUEST_INVALID` (Roots/Intermediates/Issuers do not parse).
-- Limits on attacker-controlled PDFs: a structure check before parsing (nesting ≤ 256, ObjStm budget); the revision parser
-  has recursion ≤ 64, ≤ 1,000,000 nodes, inflate ≤ 64 MiB, ≤ 128 xref sections, object numbers < 2^23; every FlateDecode
-  stream ≤ 64 MiB; DSS streams ≤ 1 MiB (≤ 64 each); chain building ≤ 100 attempts; OCSP answers ≤ 16 KiB, HTTP ≤ 4 MiB, 10 s.
-- Conformance: `testdata/pades-validate` = Go v0.31.0 `pades/testdata/validate` (+ the golden files it references)
-  (`./build/sync-validate.sh`, CI `validate-sync`); every case's report is deep-equal to Go's (`ValidatePdfCorpusTests`).
+- Limits on attacker-controlled PDFs (the same as Go/TS — exceeding them gives `PDF_INVALID`): a structure check before
+  parsing — nesting ≤ 256; ≤ 128 xref sections (a document with more than 128 incremental updates is `PDF_INVALID`); every
+  xref stream `/W` entry 0…8 with a row width > 0, `/Index` start + count ≤ 2^21, ≤ 2^21 xref stream rows in total; a single
+  filter on xref and object streams; inflated xref + object streams ≤ 32 MiB together; object-stream lookup work (header pairs
+  × inflated length, summed) ≤ 1 GiB (an object stream with very many members is `PDF_INVALID`). Signatures: ≤ 32
+  certificates per CMS or timestamp token, RSA ≤ 8192 bits, e ≤ 2^32−1, certificate/TSTInfo serial ≤ 160 bits (value) —
+  otherwise that signature is `malformed_signature`; a SHA-1/MD5/MD2 SignerInfo signature algorithm is `weak_algorithm`. DSS:
+  streams ≤ 1 MiB (≤ 64 each), ≤ 8 MiB decoded in total, a stream referenced twice is read once. Extra .NET safeguards (no
+  effect on reports): the revision parser has recursion ≤ 64, ≤ 1,000,000 nodes, inflate ≤ 64 MiB, object numbers < 2^23; the
+  reader has every FlateDecode stream ≤ 64 MiB, ≤ 256 MiB per open, recursion ≤ 512, and indexes an object stream's header
+  once; chain building ≤ 100 attempts; OCSP answers ≤ 16 KiB, HTTP ≤ 4 MiB, 10 s.
+- Conformance: `testdata/pades-validate` = Go `222acbd` `pades/testdata/validate` (corpus v14, 80 cases; + the golden files
+  it references) (`./build/sync-validate.sh`, CI `validate-sync`); every case's report is deep-equal to Go's
+  (`ValidatePdfCorpusTests`).
 
 ## Support compared with Go / TS
 

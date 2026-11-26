@@ -237,13 +237,23 @@ internal static class Extract
         }
         if (dss is not null)
             foreach (var s in sigs) s.Dss = dss;
+        // Зөвхөн бүрэн бүтэн (Integrity) гарын үсэг л «гарын үсгийн өргөтгөл» болно (Go extract.go extractWith): криптографаар
+        // таараагүй гарын үсэгтэй revision DSS-only горимд орж татгалзагдана. Name — own-signer-ийн харагдах дардасны /Name-тэй
+        // тулгах гэрчилгээний харуулах нэр (OwnAppearance).
         var known = new Dictionary<int, long[]>();
         var metas = new Dictionary<int, SigMeta>();
         foreach (var s in sigs)
         {
-            if (s.Malformed) continue;
+            if (s.Malformed || !s.Integrity) continue;
             known[s.ObjNum] = s.ByteRange!;
-            metas[s.ObjNum] = new SigMeta { RevIndex = 1, Role = "", RoleOk = s.ClaimedRoles.Count <= 1, Seal = ValCert.SealCertificateDer(s.Leaf) };
+            metas[s.ObjNum] = new SigMeta
+            {
+                RevIndex = 1,
+                Role = "",
+                RoleOk = s.ClaimedRoles.Count <= 1,
+                Seal = ValCert.SealCertificateDer(s.Leaf),
+                Name = CertDisplayName(s.Leaf),
+            };
         }
         foreach (var kv in metas)
         {
@@ -266,6 +276,20 @@ internal static class Extract
             s.LaterVisible = later.Visible;
         }
         return (sigs, docId);
+    }
+
+    /// <summary>Go certDisplayName: DER гэрчилгээний харуулах нэр (GIVENNAME SURNAME, эс бөгөөс CN); задрахгүй бол "".</summary>
+    private static string CertDisplayName(byte[]? der)
+    {
+        if (der is null) return "";
+        try
+        {
+            return Evaluator.DisplayName(ValCert.Parse(der));
+        }
+        catch (ValCertException)
+        {
+            return "";
+        }
     }
 
     /// <summary>widget харагдах: /AP-тэй эсвэл /Rect-ийн өргөн, өндөр хоёулаа 0 биш.</summary>
@@ -304,7 +328,7 @@ internal static class Extract
         s.SubFilter = obj.Key("SubFilter").Name;
 
         var p7 = ParsePkcs7(contents);
-        if (p7 is null || p7.Signers.Count != 1)
+        if (p7 is null || p7.Signers.Count != 1 || !BoundedCerts(p7.Certs))
         {
             s.Malformed = true;
             return s;
@@ -328,11 +352,66 @@ internal static class Extract
         }
         foreach (var c in p7.Certs)
             if (!c.Raw.AsSpan().SequenceEqual(leaf.Raw)) s.Certs.Add(c.Raw);
-        s.WeakDigest = !Strong.Contains(si.DigestAlg);
+        // SignerInfo-ийн гарын үсгийн алгоритм (sha1WithRSAEncryption, ecdsa-with-SHA1 …) сул бол digest SHA-256 байсан ч сул
+        // (Go extract.go weakSignatureOID).
+        s.WeakDigest = !Strong.Contains(si.DigestAlg) || WeakSignatureOids.Contains(si.EncAlg);
         s.Integrity = VerifyPkcs7(p7, sb.Value.Signed);
         s.Timestamp = ExtractTimestamp(si);
         return s;
     }
+
+    /// <summary>Go weakSignatureOIDs: SignerInfo.signatureAlgorithm-д сул (MD2/MD5/SHA-1-тэй RSA, DSA, ECDSA).</summary>
+    internal static readonly HashSet<string> WeakSignatureOids = new(StringComparer.Ordinal)
+    {
+        "1.2.840.113549.1.1.2", // md2WithRSAEncryption
+        "1.2.840.113549.1.1.4", // md5WithRSAEncryption
+        "1.2.840.113549.1.1.5", // sha1WithRSAEncryption
+        "1.2.840.10040.4.3", // dsa-with-sha1
+        "1.2.840.10045.4.1", // ecdsa-with-SHA1
+        "1.3.14.3.2.29", // sha1WithRSASignature (OIW)
+    };
+
+    // Баримтад суулгасан гэрчилгээний хязгаар (Go extract.go): CMS бүрд ≤ 32, RSA модуль ≤ 8192 бит, илтгэгч ≤ 2^32−1, serial ≤ 160 бит.
+    private const int MaxRsaBits = 8192;
+    private const int MaxSerialBits = 160;
+
+    /// <summary>Эерэг big-endian байтын (тэргүүлэх 0x00-ийг алгасаад) битийн урт (TS bitLength).</summary>
+    private static long BitLength(ReadOnlySpan<byte> b)
+    {
+        int i = 0;
+        while (i < b.Length && b[i] == 0) i++;
+        if (i == b.Length) return 0;
+        return (long)(b.Length - i - 1) * 8 + (32 - BitOperations.LeadingZeroCount((uint)b[i]));
+    }
+
+    /// <summary>INTEGER агуулгын (two's complement) абсолют утгын битийн урт — Go big.Int.BitLen (TS intBitLength).</summary>
+    internal static long IntBitLength(ReadOnlySpan<byte> v)
+    {
+        if (v.Length == 0 || (v[0] & 0x80) == 0) return BitLength(v);
+        if (v.Length > 64) return (long)v.Length * 8; // сөрөг, хэт урт — хязгаараас ихийг л мэдэхэд хангалттай
+        return (long)BigInteger.Abs(new BigInteger(v, isUnsigned: false, isBigEndian: true)).GetBitLength();
+    }
+
+    /// <summary>Go boundedCert: serial ≤ 160 бит; RSA бол модуль ≤ 8192 бит, илтгэгч ≤ 2^32−1 (задрахгүй RSA түлхүүр — хязгаараас гадна).</summary>
+    internal static bool BoundedCert(ValCert c)
+    {
+        if (IntBitLength(c.Serial) > MaxSerialBits) return false;
+        if (c.KeyAlg != ValCert.OidRsaEncryption) return true;
+        try
+        {
+            var k = Asn1.Children(Asn1.Expect(Asn1.ParseOne(c.PublicKey), Asn1.Sequence, "RSAPublicKey"));
+            var n = Asn1.Expect(Asn1.At(k, 0), Asn1.Integer, "n").Value.Span;
+            var e = Asn1.Expect(Asn1.At(k, 1), Asn1.Integer, "e").Value.Span;
+            return BitLength(n) <= MaxRsaBits && BitLength(e) <= 32;
+        }
+        catch (Exception ex) when (IsParse(ex))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Go boundedCerts: ≤ <see cref="MaxCmsCerts"/>, тус бүр <see cref="BoundedCert"/>.</summary>
+    internal static bool BoundedCerts(List<ValCert> cs) => cs.Count <= MaxCmsCerts && cs.TrueForAll(BoundedCert);
 
     // ── PKCS#7 (digitorus/pkcs7-ийн хэрэгтэй дэд хэсэг) ──
 
@@ -390,10 +469,9 @@ internal static class Extract
             var p7 = new Pkcs7 { Content = content };
             if (Asn1.At(sd, i)?.Tag == 0xa0)
             {
-                var certNodes = Asn1.Children(sd[i]);
-                // Хууль ёсны CMS-д ≤ ~6 гэрчилгээ; хязгааргүй жагсаалт гинжийн угсралтыг O(n²) болгоно — fail-closed (malformed).
-                if (certNodes.Count > MaxCmsCerts) return null;
-                foreach (var c in certNodes) p7.Certs.Add(ValCert.Parse(c.Raw));
+                // Гэрчилгээний тоо/хэмжээний хязгаарыг дуудагч BoundedCerts-ээр шалгана (Go: pkcs7.Parse-ийн дараа) — цагийн
+                // тэмдгийн токенд хязгаар хэтэрсэн ч TSTInfo-ийн цаг/serial тайланд орно.
+                foreach (var c in Asn1.Children(sd[i])) p7.Certs.Add(ValCert.Parse(c.Raw));
                 i++;
             }
             if (Asn1.At(sd, i)?.Tag == 0xa1) i++;
@@ -787,7 +865,10 @@ internal static class Extract
                 hashAlg = Asn1.OidString(Asn1.Expect(Asn1.At(Asn1.Children(Asn1.Expect(Asn1.At(mi, 0), Asn1.Sequence, "alg")), 0), Asn1.Oid, "alg"));
                 hashed = Asn1.Expect(Asn1.At(mi, 1), Asn1.OctetString, "hashedMessage").Value;
                 if (hashed.Length == 0) return o;
-                serial = GoFmt.HexSerial(Asn1.Expect(Asn1.At(info, 3), Asn1.Integer, "serial").Value.Span);
+                var sv = Asn1.Expect(Asn1.At(info, 3), Asn1.Integer, "serial").Value.Span;
+                // TSTInfo serialNumber ≤ 160 бит (Go extract.go: timestamp.Parse-ийн дараа, цаг/serial тавихаас өмнө).
+                if (IntBitLength(sv) > MaxSerialBits) return o;
+                serial = GoFmt.HexSerial(sv);
                 time = GoTime.FromPrecise(Asn1.ParsePreciseTime(Asn1.Expect(Asn1.At(info, 4), Asn1.GeneralizedTime, "genTime")));
             }
             catch (Exception e) when (IsParse(e))
@@ -796,7 +877,7 @@ internal static class Extract
             }
             o.Time = time;
             o.Serial = serial;
-            if (tok.Signers.Count != 1) return o;
+            if (tok.Signers.Count != 1 || !BoundedCerts(tok.Certs)) return o;
             var tsa = OnlySigner(tok);
             if (tsa is null) return o;
             o.TsaCert = tsa.Raw;
