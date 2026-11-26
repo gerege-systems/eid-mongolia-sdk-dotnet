@@ -190,7 +190,7 @@ public sealed class OcspRevocationChecker
         {
             throw Fail(new EidOcspException(OcspErrorKinds.NoIssuer, detail: "өгсөн issuer энэ гэрчилгээг гаргаагүй"));
         }
-        var key =Convert.ToHexString(SHA256.HashData(iss.Raw), 0, 8).ToLowerInvariant() + ":" + leaf.SerialHex();
+        var key = Convert.ToHexString(SHA256.HashData(iss.Raw), 0, 8).ToLowerInvariant() + ":" + leaf.SerialHex();
         RevocationStatus? cached = null;
         lock (_mu)
         {

@@ -141,7 +141,12 @@ public class TokenTests
         (c, _, _) = Rig.Create(200, "{\"sessionID\":\"ts1\",\"csrAuthSha256\":\"" + Hex(csrS) + "\",\"csrSignSha256\":\"" + Hex(csrS) + "\"}");
         var e = await Assert.ThrowsAsync<EidValidationException>(() => c.Token.IssueCertificateAsync(new TokenCertInput
         {
-            SignerEtsi = "PNOMN-1", CsrAuth = csrA, CsrSign = csrS, TokenSerial = "x", TokenLabel = "L", OnBehalfOf = "NTRMN-1",
+            SignerEtsi = "PNOMN-1",
+            CsrAuth = csrA,
+            CsrSign = csrS,
+            TokenSerial = "x",
+            TokenLabel = "L",
+            OnBehalfOf = "NTRMN-1",
         }));
         Assert.Equal(ValidationReasons.TokenCsrMismatch, e.Reason);
         await Assert.ThrowsAsync<ArgumentException>(() => c.Token.IssueCertificateAsync(new TokenCertInput()));
@@ -237,7 +242,11 @@ public class TokenTests
         var hx = (Hex(csrA).ToLowerInvariant(), Hex(csrS).ToLowerInvariant());
         var input = new TokenCertInput
         {
-            SignerEtsi = "PNOMN-12345678", CsrAuth = csrA, CsrSign = csrS, TokenSerial = "EP2003-0042A1", AppTransaction = "eyJhbGciOiJFUzI1NiJ9.e30.sig",
+            SignerEtsi = "PNOMN-12345678",
+            CsrAuth = csrA,
+            CsrSign = csrS,
+            TokenSerial = "EP2003-0042A1",
+            AppTransaction = "eyJhbGciOiJFUzI1NiJ9.e30.sig",
         };
         var (c, h, _) = Rig.Create(200, "{\"sessionID\":\"ts1\",\"vc\":{\"type\":\"alphaNumeric5\",\"value\":\"04817\"},\"csrAuthSha256\":\"" + hx.Item1 +
             "\",\"csrSignSha256\":\"" + hx.Item2 + "\"}");
