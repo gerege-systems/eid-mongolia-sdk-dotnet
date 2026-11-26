@@ -27,14 +27,50 @@ jobs:
       - run: dotnet build EidMongolia.Pades.sln -c Release
       - run: dotnet test EidMongolia.Pades.sln -c Release --no-build --logger "console;verbosity=normal"
       - name: pack
+        # Lockstep гурван багц (core, AspNetCore, Pades) + snupkg; хувилбар нь Pades csproj-ийн <Version>.
         if: matrix.os == 'ubuntu-latest'
-        run: dotnet pack src/GeregeSystems.EidMongolia.Pades -c Release --no-build -o artifacts/nupkg
+        shell: bash
+        run: |
+          dotnet pack EidMongolia.Pades.sln -c Release --no-build -o artifacts/nupkg
+          ver=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/GeregeSystems.EidMongolia.Pades/GeregeSystems.EidMongolia.Pades.csproj)
+          ./build/check-packages.sh artifacts/nupkg "$ver"
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest'
         with:
           name: nupkg
-          path: artifacts/nupkg/*.nupkg
+          path: |
+            artifacts/nupkg/*.nupkg
+            artifacts/nupkg/*.snupkg
           if-no-files-found: error
+
+  compat:
+    # Pades 0.16.0-ийн (nuget.org) эсрэг compile хийсэн «Миний QR» хэрэглэгч 0.17.0-ийн dll дээр (TypeForwardedTo → core)
+    # дахин compile-гүйгээр ажиллана; мөн энэ репогийн Pades-ийн эсрэг source-оор compile болно (docs/release-0.17.0.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: build 0.17.0 (net8.0)
+        run: dotnet build src/GeregeSystems.EidMongolia.Pades -c Release -f net8.0
+      - name: source compat (энэ репогийн Pades)
+        run: |
+          dotnet build build/compat/PadesQrCompat -c Release
+          dotnet build/compat/PadesQrCompat/bin/Release/net8.0/PadesQrCompat.dll GeregeSystems.EidMongolia
+      - name: binary compat (Pades 0.16.0-ийн эсрэг compile → 0.17.0-ийн dll)
+        shell: bash
+        run: |
+          rm -rf build/compat/PadesQrCompat/bin build/compat/PadesQrCompat/obj
+          dotnet build build/compat/PadesQrCompat -c Release -p:CompatAgainst=0.16.0 -o .compat/bin
+          dotnet .compat/bin/PadesQrCompat.dll GeregeSystems.EidMongolia.Pades
+          cp src/GeregeSystems.EidMongolia.Pades/bin/Release/net8.0/GeregeSystems.EidMongolia.Pades.dll .compat/bin/
+          cp src/GeregeSystems.EidMongolia/bin/Release/net8.0/GeregeSystems.EidMongolia.dll .compat/bin/
+          # deps.json-д core алга (0.16.0) — устгавал host app хавтасны бүх dll-ийг ачаална.
+          rm .compat/bin/PadesQrCompat.deps.json
+          dotnet .compat/bin/PadesQrCompat.dll GeregeSystems.EidMongolia
 
   golden-sync:
     # testdata/golden нь build/go-sdk.ref дээрх eid-mongolia-sdk-go pades/testdata/golden-тэй яг ижил.

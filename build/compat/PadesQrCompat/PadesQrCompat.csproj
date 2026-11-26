@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    «Миний QR»-ийн binary/source нийцлийн хэрэглэгч (CI compat job; EidMongolia.Pades.sln-д ороогүй).
+    -p:CompatAgainst=0.16.0 — nuget.org-ийн GeregeSystems.EidMongolia.Pades 0.16.0-ийн эсрэг compile (дараа нь 0.17.0-ийн
+    dll-ээр солиж дахин compile-гүйгээр ажиллуулна); анхдагч — энэ репогийн Pades project-ийн эсрэг (source нийцэл).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(CompatAgainst)' != ''">
+    <PackageReference Include="GeregeSystems.EidMongolia.Pades" Version="$(CompatAgainst)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(CompatAgainst)' == ''">
+    <ProjectReference Include="../../../src/GeregeSystems.EidMongolia.Pades/GeregeSystems.EidMongolia.Pades.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -63,10 +63,11 @@ public sealed class EidClientOptions
 }
 
 /// <summary>
-/// eID Mongolia RP-API client (Go <c>eid.Client</c>, TS <c>EidClient</c>-ийн .NET порт — хөгжүүлэлт явагдаж байна).
-/// Одоогоор: тохиргоо, HTTP давхарга, алдаа, <see cref="Auth"/> (push / device link + discovery), <see cref="Sign"/>
-/// (digest / text / linked / device link / certificate-choice), <see cref="Session"/> (poll / wait), <see cref="Pdf"/>
-/// (<c>POST /pdf/signatures</c>), <see cref="Validator"/> (хариуны криптограф баталгаажуулалт, цуцлалт). mTLS: client
+/// eID Mongolia RP-API client (Go <c>eid.Client</c>, TS <c>EidClient</c>-ийн .NET порт): тохиргоо, HTTP давхарга, алдаа,
+/// <see cref="Auth"/> (push / device link + discovery), <see cref="Sign"/> (digest / text / linked / device link /
+/// certificate-choice), <see cref="Session"/> (poll / wait), <see cref="Pdf"/> (<c>POST /pdf/signatures</c>),
+/// <see cref="Validator"/> (хариуны криптограф баталгаажуулалт, цуцлалт), <see cref="Organization"/>, <see cref="Person"/>,
+/// <see cref="Seal"/>, <see cref="Token"/>, <see cref="ShareAsync"/>, <see cref="Qr"/> («Миний QR»). mTLS: client
 /// certificate-тэй <see cref="HttpClient"/>-ийг конструкторт өгнө. Thread-safe.
 /// </summary>
 public sealed class EidClient : IDisposable

@@ -12,19 +12,29 @@
     <PackageId>GeregeSystems.EidMongolia.AspNetCore</PackageId>
     <Authors>Gerege Systems LLC</Authors>
     <Company>Gerege Systems LLC</Company>
-    <Description>ASP.NET Core adapter for the eID Mongolia relying-party SDK (in progress): services.AddEidMongolia(...) and app.MapEidLogin("/auth/eid", ...) over the framework-neutral EidLoginHandler (login-button backend). No package dependencies beyond the ASP.NET Core shared framework.</Description>
+    <Description>ASP.NET Core adapter for the eID Mongolia relying-party SDK: services.AddEidMongolia(...) and app.MapEidLogin("/auth/eid", ...) over the framework-neutral EidLoginHandler (login-button backend). No package dependencies beyond GeregeSystems.EidMongolia and the ASP.NET Core shared framework.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>eid;mongolia;smart-id;authentication;aspnetcore;rp</PackageTags>
     <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- core / Pades / AspNetCore нэг хувилбартай (lockstep). -->
     <Version>0.17.0</Version>
-    <!-- Нийтлэхгүй (WP 6 release-ийн өөрчлөлттэй хамт асаана). -->
-    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../GeregeSystems.EidMongolia/GeregeSystems.EidMongolia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>
