@@ -1,0 +1,26 @@
+name: Contract
+# SDK ↔ live /.well-known/eid гэрээ (Go/TS репотой ижил). Өдөр бүр 00:00 UTC (08:00 +08); унавал GitHub-ийн анхдагч
+# мэдэгдэл. Secret шаардахгүй — зөвхөн нийтийн discovery.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: route table vs live discovery
+        env:
+          EID_CONTRACT: "1"
+        run: >-
+          dotnet test tests/GeregeSystems.EidMongolia.Tests -c Release -f net10.0
+          --filter "Category=Contract" --logger "console;verbosity=detailed"

@@ -260,6 +260,27 @@ Codes (`EidQrException.Code`): `QR_FORMAT_INVALID` (does not go to the CA), `QR_
 (`EndResult`), the server's `code` with `HttpStatus` (400 `REQUEST_INVALID`, 403 `PERMISSION_DENIED` / `RP_REQUIRED`, 404
 `QR_TOKEN_INVALID`, 409 `NO_SIGNING_CERTIFICATE`, 429 `RATE_LIMITED`), `HTTP_ERROR`, `NETWORK_ERROR`.
 
+## RP SDK core — `GeregeSystems.EidMongolia` (in progress)
+
+> **In progress — not published to NuGet yet.** Goal: a full server-side RP SDK with the same scope as the TypeScript
+> and Go SDKs (Auth, Sign, Session, Validator, OCSP, login backend …). The API may change until it is published.
+
+Available so far (`src/GeregeSystems.EidMongolia`, no package dependencies, `net8.0` / `net10.0`):
+
+- `EidClient` + `EidClientOptions` / `EidCredentials` — base-URL rules (https; http only for loopback; a clear error
+  for the legacy `ca.eidmongolia.mn` host), Bearer auth, timeouts (default 15 s, PDF 80 s), `Accept-Language`, 4 MiB
+  JSON cap; mTLS — pass an `HttpClient` with a client certificate to the constructor. `client.Auth.SessionTtlAsync()` —
+  the discovery `sessionTtl`.
+- Errors: `EidException` (`Code`, `Status`, `RetryAfter`, `Retryable`) → `EidAuthenticationException` (401),
+  `EidForbiddenException` (403), `EidApiException` (with a subclass per known code), `EidNetworkException`,
+  `EidResponseTooLargeException`, `EidSessionFailedException`, `EidValidationException`, `EidDeviceLinkException`.
+- Crypto: `Acsp.BuildV2Payload` / `V2Digest`, `EidCrypto.InteractionsToBase64` (byte-identical to JS
+  `JSON.stringify`), `DeviceLink.Build` / `TickQrAsync` (authCode = HMAC-SHA256), `EidCrypto.SessionSecretDigest`,
+  `RandomChallenge`, `UserChallengeOf`.
+- Verification: the CA device-link golden (`testdata/devicelink_golden.json`, SHA-256 pinned in the test), the Smart-ID
+  ACSP_V2 vector, interactions escaping; `.github/workflows/contract.yml` checks the route table against the live
+  `/.well-known/eid` daily.
+
 ## Development
 
 - Profile rules: the Go repo's `pades/PROFILE.md`, `PAGE_SPEC.md`, `PRECHECKS.md`, `WIRE.md`, `APPEARANCE_SPEC.md`,
