@@ -203,8 +203,11 @@ public class ContractTests
         {
             return;
         }
-        Assert.True(d.TryGetProperty("pdfSigning", out var ps) && ps.TryGetProperty("registerErrorCodes", out var codes),
-            "pdfSigning.registerErrorCodes discovery-д алга");
+        if (!d.TryGetProperty("pdfSigning", out var ps) || !ps.TryGetProperty("registerErrorCodes", out var codes))
+        {
+            Assert.Fail("pdfSigning.registerErrorCodes discovery-д алга");
+            return;
+        }
         var ca = codes.EnumerateArray().Select(x => x.GetString()!).Distinct().OrderBy(x => x, StringComparer.Ordinal);
         Assert.Equal(ca, PdfErrorCodes.All.Distinct().OrderBy(x => x, StringComparer.Ordinal));
     }
