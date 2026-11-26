@@ -1,4 +1,4 @@
-            WeakKey = RsaBits < MinRsaBits || exp < 3 || exp.IsEven;using System;
+using System;
 using System.Collections.Generic;
 using System.Formats.Asn1;
 using System.Numerics;
