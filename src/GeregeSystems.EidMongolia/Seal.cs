@@ -24,7 +24,7 @@ namespace GeregeSystems.EidMongolia;
 /// CA V156): <see cref="RequestGrantAsync"/> → <see cref="GrantStatusAsync"/> / <see cref="WaitForGrantAsync"/>.
 /// </para>
 /// </summary>
-public sealed class SealService
+public sealed partial class SealService
 {
     /// <summary>Хүлээлтийн анхдагч дээд хугацаа (CA-ийн батлах цонх = sign session TTL + 2 мин-ээс урт).</summary>
     public static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromMinutes(15);
@@ -138,8 +138,8 @@ public sealed class SealService
     /// <param name="digest">Hash-ийн урттай digest.</param>
     /// <param name="hashAlgorithm"><see cref="HashAlgorithms"/>; null / "" = SHA-256.</param>
     /// <param name="options">
-    /// .NET-ийн нэмэлт (CA V158 <c>dto.SealRequest</c>; Go/TS одоогоор илгээдэггүй): QR-тэй дардасны <c>docId</c> /
-    /// <c>revIndex</c> — хоёулаа эсвэл аль нь ч үгүй.
+    /// CA V158 <c>dto.SealRequest</c>: QR-тэй дардасны <c>docId</c> / <c>revIndex</c> нөөц — хоёулаа эсвэл аль нь ч үгүй
+    /// (хэлбэрийг шалгадаг хувилбар: <see cref="SealForDocumentAsync"/>, Go <c>SealForDocument</c>, TS <c>sealForDocument</c>).
     /// </param>
     /// <param name="ct">Цуцлалт.</param>
     /// <exception cref="ArgumentException">hash дэмжигдэхгүй, digest-ийн урт буруу, эсвэл docId/revIndex-ийн зөвхөн нэг нь (хүсэлт явахгүй).</exception>

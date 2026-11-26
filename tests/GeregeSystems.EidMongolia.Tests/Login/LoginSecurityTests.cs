@@ -599,7 +599,7 @@ public class LoginSecurityTests
         }
         Assert.Equal(429, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "192.0.2.1")).Code);
         Assert.Equal(200, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "192.0.2.2")).Code);
-        // IP мэдэгдэхгүй (RemoteIp алга) — start хязгаар үйлчлэхгүй.
+        // IP мэдэгдэхгүй (RemoteIp алга) — нийтийн start:unknown bucket (rp-conformance/2; энд анхны хүсэлт).
         Assert.Equal(200, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}")).Code);
         st.Time.Now += TimeSpan.FromSeconds(61);
         Assert.Equal(200, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "192.0.2.1")).Code);
@@ -704,9 +704,11 @@ public class LoginSecurityTests
     [Theory]
     [InlineData("203.0.113.7", "203.0.113.7")]
     [InlineData("2001:db8:1:2:3:4:5:6", "2001:db8:1:2::/64")]
-    [InlineData("2001:DB8:0:0::1", "2001:db8::/64")]
-    [InlineData("fe80::1%2", "fe80::/64")]
-    [InlineData("::1", "::/64")]
+    [InlineData("2001:DB8:0:0::1", "2001:db8:0:0::/64")]
+    [InlineData("fe80::1%2", "fe80:0:0:0::/64")]
+    [InlineData("fe80::1%eth0", "fe80:0:0:0::/64")]
+    [InlineData("[2001:db8:0001:0003::1]", "2001:db8:1:3::/64")]
+    [InlineData("::1", "0:0:0:0::/64")]
     [InlineData("::ffff:203.0.113.9", "203.0.113.9")]
     [InlineData("not-an-ip", "not-an-ip")]
     [InlineData("2001:db8::zz", "2001:db8::zz")]
@@ -716,7 +718,7 @@ public class LoginSecurityTests
     }
 
     [Fact]
-    public void WindowLimiterFullFailsClosed()
+    public void WindowLimiterFullUsesOverflowBucket()
     {
         var t = new FakeTime(DateTimeOffset.UtcNow);
         var lim = new WindowLimiter(1, TimeSpan.FromMilliseconds(50), 3, t);
@@ -724,10 +726,12 @@ public class LoginSecurityTests
         Assert.False(lim.Allow("push:victim"));
         Assert.True(lim.Allow("a"));
         Assert.True(lim.Allow("b"));
-        Assert.False(lim.Allow("c"));
+        // Хүснэгт дүүрсэн: шинэ түлхүүрүүд нэг нийтийн overflow bucket-д (татгалзахгүй, байгаа тоолуурыг арилгахгүй).
+        Assert.True(lim.Allow("c"));
+        Assert.False(lim.Allow("d"));
         Assert.False(lim.Allow("push:victim"));
         t.Now += TimeSpan.FromMilliseconds(60);
-        Assert.True(lim.Allow("c"));
+        Assert.True(lim.Allow("d"));
     }
 
     // ---- store ----

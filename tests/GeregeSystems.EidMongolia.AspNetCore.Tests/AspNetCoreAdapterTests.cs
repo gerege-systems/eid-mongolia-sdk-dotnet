@@ -68,13 +68,13 @@ public class AspNetCoreAdapterTests
             };
 
             // ClientIp өгөөгүй — MapEidLogin-ий анхдагч RemoteAddress (start:127.0.0.1).
-            // QR start → HttpOnly/Secure/SameSite cookie, no-store.
+            // QR start → HttpOnly/Secure/SameSite cookie (анхдагч нэр __Host-eid_login: Secure, Domain-гүй, Path=/), no-store.
             var start = await http.PostAsync("/auth/eid/start", new StringContent("{\"mode\":\"qr\"}", Encoding.UTF8, "application/json"));
             Assert.Equal(HttpStatusCode.OK, start.StatusCode);
             Assert.Equal("no-store", start.Headers.CacheControl?.ToString());
             var sb = JsonNode.Parse(await start.Content.ReadAsStringAsync())!.AsObject();
             Assert.Equal("expiresIn,mode,qr,vc", string.Join(",", sb.Select(p => p.Key).OrderBy(x => x, StringComparer.Ordinal)));
-            var setCookie = start.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("eid_login=", StringComparison.Ordinal));
+            var setCookie = start.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("__Host-eid_login=", StringComparison.Ordinal));
             Assert.Contains("; HttpOnly", setCookie);
             Assert.Contains("; Secure", setCookie);
             Assert.Contains("; SameSite=Lax", setCookie);
@@ -93,7 +93,7 @@ public class AspNetCoreAdapterTests
             Assert.Equal(FakeEid.Etsi, (string?)ok.Json!["data"]!["user"]);
             var okCookies = ok.Res.Headers.GetValues("Set-Cookie").ToList();
             Assert.Contains(okCookies, c => c.StartsWith("app_session=s1", StringComparison.Ordinal));
-            Assert.Contains(okCookies, c => c.StartsWith("eid_login=;", StringComparison.Ordinal) && c.Contains("Max-Age=0"));
+            Assert.Contains(okCookies, c => c.StartsWith("__Host-eid_login=;", StringComparison.Ordinal) && c.Contains("Max-Age=0"));
             Assert.Equal("EXPIRED", (string?)(await Get(http, "/auth/eid/status", cookie)).Json!["state"]);
 
             // Алдааны хэлбэр ба статус.

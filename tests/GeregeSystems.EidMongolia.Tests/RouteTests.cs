@@ -15,8 +15,8 @@ public class RouteTests
     [Fact]
     public void RouteTableMirrorsGo()
     {
-        // Go routes.go rpRoutes — 32 зам, давхардалгүй.
-        Assert.Equal(32, RpRoutes.All.Count);
+        // Go routes.go rpRoutes — 33 зам (CA V158 тамганы бүртгэлтэй), давхардалгүй.
+        Assert.Equal(33, RpRoutes.All.Count);
         Assert.Equal(RpRoutes.All.Count, RpRoutes.All.Select(r => r.Method + " " + r.Path).Distinct().Count());
         Assert.All(RpRoutes.All, r => Assert.Contains(r.Method, new[] { "GET", "POST" }));
         Assert.All(RpRoutes.All, r => Assert.StartsWith("/", r.Path, StringComparison.Ordinal));
@@ -290,6 +290,40 @@ public class ContractTests
             }
         }
         Assert.True(errors.Count == 0, string.Join("\n", errors));
+    }
+
+    /// <summary>
+    /// Go contract_test.go TestContractSealRegistration / TS «Seal registration» (CA V158): endpoints.seal.registration =
+    /// "POST &lt;base&gt;/seal/{orgEtsi}/registrations … {талбарууд}" нь <see cref="SealRegistration"/>-ийн JSON түлхүүрүүдтэй ЯГ
+    /// тэнцүү (CA DisallowUnknownFields), seal.registerErrorCodes == <see cref="SealRegisterErrorCodes.All"/> (олонлогоор),
+    /// endpoints.seal.seal нь <c>{docId, revIndex}</c> нөөцийг зарласан (<see cref="SealService.SealForDocumentAsync"/>).
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task SealRegistrationMatchesDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        var rpBase = d.GetProperty("rp_api_base").GetString();
+        var seal = d.GetProperty("endpoints").GetProperty("seal");
+        var desc = seal.TryGetProperty("registration", out var reg) ? reg.GetString() ?? "" : "";
+        var lead = "POST " + rpBase + RpRoutes.SealRegistrations.Path + " ";
+        Assert.True(desc.StartsWith(lead, StringComparison.Ordinal), "endpoints.seal.registration: " + desc);
+        var rest = desc[(lead.Length - 1)..];
+        int i = rest.IndexOf('{', StringComparison.Ordinal), j = rest.IndexOf('}', StringComparison.Ordinal);
+        Assert.True(i >= 0 && j > i, "endpoints.seal.registration-д бие алга: " + desc);
+        var want = rest[(i + 1)..j].Split(',').Select(f => f.Trim().TrimEnd('?')).OrderBy(x => x, StringComparer.Ordinal);
+        Assert.Equal(want, PdfTests.JsonNames(typeof(SealRegistration)).OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Contains("{docId, revIndex}", seal.GetProperty("seal").GetString() ?? "", StringComparison.Ordinal);
+        if (!d.TryGetProperty("seal", out var sb) || !sb.TryGetProperty("registerErrorCodes", out var codes))
+        {
+            Assert.Fail("seal.registerErrorCodes discovery-д алга");
+            return;
+        }
+        var ca = codes.EnumerateArray().Select(x => x.GetString()!).Distinct().OrderBy(x => x, StringComparer.Ordinal);
+        Assert.Equal(ca, SealRegisterErrorCodes.All.Distinct().OrderBy(x => x, StringComparer.Ordinal));
     }
 
     /// <summary>

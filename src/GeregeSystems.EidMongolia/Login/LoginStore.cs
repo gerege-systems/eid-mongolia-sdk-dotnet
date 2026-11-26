@@ -141,6 +141,13 @@ public sealed record EidLoginRateRule
     /// <summary>Өөрийн хязгаарлагч: true — зөвшөөрөх, false — 429.</summary>
     public Func<string, CancellationToken, ValueTask<bool>>? Func { get; init; }
 
+    /// <summary>
+    /// Санах ойн цонхны дээд түлхүүрийн тоо (≤ 0 = 10 000; Go <c>RateRule.MaxKeys</c>). Дүүрвэл (цонх нь өнгөрсөн түлхүүрийг
+    /// цэвэрлээд ч) ШИНЭ түлхүүрүүд нэг нийтийн overflow bucket-д (ижил Max/Window) тоологдоно; байгаа тоолуурыг хэзээ ч
+    /// арилгахгүй.
+    /// </summary>
+    public int MaxKeys { get; init; }
+
     /// <summary>Хязгааргүй (тухайн төрлийн анхдагчийг унтраана).</summary>
     public static EidLoginRateRule Unlimited { get; } = new();
 
@@ -157,13 +164,17 @@ public sealed record EidLoginRateRule
 
 /// <summary>
 /// Санах ойн гулсах цонх (түлхүүр тус бүрд), дээд тал нь maxKeys түлхүүр (Go/TS <c>windowLimiter</c>). Дүүрвэл цонх нь
-/// өнгөрсөн түлхүүрийг цэвэрлээд, хоосроогүй бол ШИНЭ түлхүүрийг татгалзана (fail-closed) — байгаа түлхүүрийн тоолуурыг
-/// хэзээ ч арилгахгүй тул олон түлхүүрээр дүүргэж тухайн дугаарын хязгаарыг тойрох боломжгүй.
+/// өнгөрсөн түлхүүрийг цэвэрлээд, хоосроогүй бол ШИНЭ түлхүүрийг нэг нийтийн overflow bucket-д (ижил limit/window)
+/// тоолно (rp-conformance/2; өмнө нь татгалздаг байсан — хүснэгт дүүргэх нь бүх шинэ хэрэглэгчийг түгжинэ). Байгаа
+/// түлхүүрийн тоолуурыг хэзээ ч арилгахгүй тул олон түлхүүрээр дүүргэж тухайн дугаарын хязгаарыг тойрох боломжгүй.
 /// </summary>
 internal sealed class WindowLimiter
 {
     /// <summary>Анхдагч дээд түлхүүрийн тоо (төрөл тус бүрд).</summary>
     public const int DefaultMaxKeys = 10_000;
+
+    /// <summary>Хүснэгт дүүрсэн үеийн шинэ түлхүүрүүдийн нийтийн bucket (хүчинтэй "kind:value" түлхүүр биш; Go <c>limiterOverflowKey</c>).</summary>
+    internal const string OverflowKey = "\0overflow";
 
     private readonly int _limit;
     private readonly TimeSpan _window;
@@ -192,7 +203,7 @@ internal sealed class WindowLimiter
                 }
                 if (_hits.Count >= _maxKeys)
                 {
-                    return false;
+                    key = OverflowKey; // overflow bucket нь maxKeys-ээс нэгээр илүү байж болно
                 }
             }
             var h = _hits.TryGetValue(key, out var prev) ? prev.Where(t => now - t < _window).ToList() : new List<DateTimeOffset>();

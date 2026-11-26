@@ -191,6 +191,27 @@ PdfSignatureRegistered ok = await client.Pdf.RegisterSignatureAsync(new PdfSigna
   Completed stamped = await EidPades.SealAsync(pdf, new SealOptions { SealCert = cert.Certificate, Reason = "Байгууллагын тамга" },
       async (dtbs, ct) => (await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)).Signature, cancellationToken: ct);
   ```
+
+  **QR-тэй тамга ба CA-ийн бүртгэл** (CA V158, Go/TS-тэй ижил): `SealOptions.Qr = true` нь дардсанд
+  `https://ca.eidmongolia.mn/verify/<docId>/<revIndex>` QR зурна; нөөцөлдөг delegate (`SealReservation`) заавал — QR-тэй дардас
+  бодитоор зурагдсан үед л нөөц ирнэ, тэгвэл `client.Seal.SealForDocumentAsync`. Дараа нь `done.SealRegistration`-ийг 7
+  хоногийн дотор `client.Seal.RegisterSealedPdfAsync`-ээр бүртгэнэ (`/verify/{docId}`-д байгууллагын мөр; 201 → `Created`,
+  ижил биеийн давталт 200; 409 `PRIOR_MISMATCH` бол SDK өмнөх мөрийн хослолыг өөрөө оролдоно). QR-гүй тамгыг ч бүртгэж болно
+  (`done.SealRegistration` нь docId мэдэгдэх үед үргэлж бөглөгдөнө). Алдааны код — `SealRegisterErrorCodes.All` (CA-ийн
+  дарааллаар; `EidSealNotFoundException`, `EidSealDocMismatchException`, `EidDocIdReservedException`).
+
+  ```csharp
+  Completed done = await EidPades.SealAsync(pdf, new SealOptions
+  {
+      SealCert = cert.Certificate,
+      Qr = true,                    // DocId = null: шинэ баримтад санамсаргүй; гарын үсэгтэйд verify хуудас / QR тамгаас
+      FileName = "Нэхэмжлэх.pdf",   // /verify-д харагдах нэр (PDF-д бичигдэхгүй)
+  }, async (dtbs, reservation, ct) => (reservation is null
+      ? await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)
+      : await client.Seal.SealForDocumentAsync(orgEtsi, dtbs, reservation.DocId, reservation.RevIndex, ct)).Signature,
+      cancellationToken: ct);
+  PdfSignatureRegistered reg = await client.Seal.RegisterSealedPdfAsync(orgEtsi, done.SealRegistration!, ct);
+  ```
 - **USB токен** — `client.Token.IssueCertificateAsync` / `PreviewCertificateAsync` / `CertificateResultAsync` /
   `CertificateInfoAsync`, `TokenService.VerifyTokenCertificates`, токены нэвтрэлт `AuthChallengeAsync` → токен дээр зурах →
   `AuthVerifyAsync` (CA руу илгээхээс өмнө digest, гарын үсэг, гинжийг локалд шалгана), `TokenService.TokenAuthDigest`.
@@ -242,7 +263,16 @@ app.MapEidLogin("/auth/eid", async (http, id) =>
 (а) дээрх шиг `UseForwardedHeaders`-ийг `KnownProxies` / `KnownNetworks`-тэй `MapEidLogin`-оос өмнө, эсвэл (б)
 `o.ClientIp = EidLoginClientIp.Forwarded(n)` (n = итгэмжит proxy-ийн тоо; `X-Forwarded-For`-ийн баруунаас n дахь утга). Аль
 нь ч үгүй бол бүх хэрэглэгч proxy-ийн нэг IP-ийн хязгаарыг хуваалцана; proxy-гүй үед `Forwarded(n)` бүү хэрэглэ (header
-хуурамчаар бичигдэнэ). IPv6 клиентийн түлхүүр нь /64 угтвар (`start:2001:db8:1:2::/64`).
+хуурамчаар бичигдэнэ). IPv6 клиентийн түлхүүр нь /64 угтвар (`start:2001:db8:1:2::/64`); `ClientIp` тохируулсан ч IP
+тодорхойгүй бол хязгааргүй биш — нийтийн `start:unknown` bucket. Push-ийн түлхүүр нь `push:<pushKey>` (`AuditKey`-ийн HMAC,
+`OnEvent`-ийн `meta.pushKey`-тэй ижил) — регистрийн дугаар хязгаарлагч ба `RateLimit` hook-д очихгүй. Санах ойн хязгаарлагч
+төрөл тус бүрд `EidLoginRateRule.MaxKeys` (анхдагч 10 000) түлхүүр хадгална; дүүрвэл шинэ түлхүүрүүд нэг нийтийн overflow
+bucket-д тоологдоно (татгалзахгүй, байгаа тоолуурыг арилгахгүй).
+
+**Cookie.** Анхдагч нэр `__Host-eid_login` (Secure, `CookieDomain`-гүй, `CookiePath` = `/` — хөтөч дэд домэйноос тарьсан
+cookie-г энэ нэрээр хүлээн авахгүй); `InsecureCookie`, `CookieDomain` эсвэл өөр `CookiePath` үед `eid_login`; `CookieName`-ийг
+өгвөл хэвээр. Хүсэлтэд энэ нэртэй cookie нэгээс олон бол cookie-гүй гэж үзнэ (status → `EXPIRED`, callback →
+`eid_error=expired`).
 
 Аюулгүй байдал Go `eidlogin` / TS `createEidLogin`-тэй ижил: төлөв серверт (`IEidLoginStore`; анхдагч `MemoryEidLoginStore` —
 нэг процесс, 10 000 дээд хэмжээ; олон instance бол Redis г.м. өөрийн store-оо `AddEidMongolia`-аас ӨМНӨ бүртгэ), хөтчид
@@ -250,7 +280,7 @@ app.MapEidLogin("/auth/eid", async (http, id) =>
 `Sec-Fetch-Site` cross-site → 403, хязгаар (start: нэг IP-ээс 60 с-д 20; push: нэг дугаарт 60 с-д 3), бүртгэлгүй дугаарт
 decoy session + push-ийн 1 с доод хугацаа, ValidateAuth + OCSP (**soft-fail анхдагч**, дээрх «Цуцлалт») дараа л `OnSuccess`
 (нэг удаа), аудитын `OnEvent` (регистрийн оронд HMAC pushKey). Хариуны хэлбэр ба 12 алдааны код нь cross-SDK корпусын
-`testdata/conformance/eidlogin/scenarios.json`-оор (24 сценари) тулгагдана. Бусад framework-д `EidLoginHandler`-ийг шууд
+`testdata/conformance/eidlogin/scenarios.json`-оор (34 сценари, eidlogin/2) тулгагдана. Бусад framework-д `EidLoginHandler`-ийг шууд
 дуудна (`EidLoginRequest` — method, URL, header, бие, `RemoteIp`).
 
 ## «Миний QR» — иргэний «Миний мэдээлэл» (`GeregeSystems.EidMongolia.Qr`)
@@ -556,8 +586,9 @@ string json = rep.ToJson();
 | «eID-ээр нэвтрэх» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / бүртгэлийн бие | ✓ | ✓ | ✓ |
 | PDF-ийн бүрэн шалгагч (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
-| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч ба `Prepare`-ийн docId) | шалгагч ✓; `Prepare` — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
-| Тамганы бүртгэл (`POST /seal/{org}/registrations`) | — | — | — |
+| QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, golden v13: шалгагч, `SealAsync` ба `Prepare`-ийн docId) | ✓ main | ✓ v0.31.0 | ✓ 0.49.0 |
+| Тамганы бүртгэл (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ main | ✓ main | ✓ main |
+| Cross-SDK корпус rp-conformance/2 (validator, OCSP, нэвтрэлтийн backend) | ✓ main | ✓ main | ✓ main |
 | `pdfDigest`, хөтчийн entry, `convert` | — | — | ✓ (TS-д л) |
 
 ## Хөгжүүлэлт
@@ -575,7 +606,7 @@ string json = rep.ToJson();
   харагдах golden тохиолдол бүрд `SuggestPlacement` (`expect.suggestion` талбар бүрээр, `suggestionError`).
 - Фонт (`Assets/`): Noto Sans subset, SIL OFL 1.1 — Go reference-ийн `pades/assets/fonts`-тай ижил байт.
 - PDF уншигч/бичигч нь digitorus/pdf (BSD-3) ба digitorus/pdfsign (BSD-2)-ийн семантикийг давтана — лиценз `Pdf/LICENSE.*`.
-- RP SDK: `testdata/conformance` = Go репогийн `testdata/conformance` (rp-conformance/1)-ийн байт-ижил хуулбар
+- RP SDK: `testdata/conformance` = Go репогийн `testdata/conformance` (rp-conformance/2)-ийн байт-ижил хуулбар
   (`./build/sync-conformance.sh`; CI `conformance-sync`); тест `tests/GeregeSystems.EidMongolia.Tests` ба
   `tests/GeregeSystems.EidMongolia.AspNetCore.Tests` (`net8.0` + `net10.0`); `build/compat` — Pades 0.16.0-тэй binary
   нийцэл (CI `compat`); `build/check-packages.sh` — гурван багцын metadata ба хамаарал (CI `pack`).

@@ -90,6 +90,7 @@ internal static class RpRoutes
     public static readonly RpRoute SealCertificateRequest = new("POST", "/seal/certificate/{orgEtsi}");
     public static readonly RpRoute SealCertificateRequestStatus = new("GET", "/seal/certificate/{orgEtsi}/requests/{requestId}");
     public static readonly RpRoute Seal = new("POST", "/seal/{orgEtsi}");
+    public static readonly RpRoute SealRegistrations = new("POST", "/seal/{orgEtsi}/registrations");
     public static readonly RpRoute SealGrants = new("POST", "/seal/grants");
     public static readonly RpRoute SealGrantStatus = new("GET", "/seal/grants/{grantId}");
     public static readonly RpRoute OrgSealGrants = new("GET", "/organization/seal-grants/etsi/{personEtsi}");
@@ -112,7 +113,7 @@ internal static class RpRoutes
         TokenCertificate, TokenCertificateResult,
         TokenAuthChallenge, TokenAuthVerify,
         Share,
-        SealCertificate, SealCertificateRequest, SealCertificateRequestStatus, Seal,
+        SealCertificate, SealCertificateRequest, SealCertificateRequestStatus, Seal, SealRegistrations,
         SealGrants, SealGrantStatus, OrgSealGrants,
     };
 

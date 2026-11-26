@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RP SDK-ийн cross-SDK conformance корпусыг (eid-mongolia-sdk-go testdata/conformance, rp-conformance/1)
+# RP SDK-ийн cross-SDK conformance корпусыг (eid-mongolia-sdk-go testdata/conformance, rp-conformance/2)
 # build/go-sdk-conformance.ref commit-оос testdata/conformance руу хуулна. pki/keys/ (генераторын хувийн түлхүүр)
 # хуулагдахгүй (корпусын README). --check: хуулбар тэр commit-той байт-ижил эсэхийг шалгана (CI).
 # Файл бүрийн SHA-256-ийг manifest.json-оор ConformanceTests.Manifest шалгана.

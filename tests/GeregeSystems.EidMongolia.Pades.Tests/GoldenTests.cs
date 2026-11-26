@@ -63,6 +63,8 @@ public class GoldenTests
         {
             // golden v12: "signer": "seal" = pki/seal.pem (e-Seal → тамганы дардас, APPEARANCE_SPEC.md §6); алга = иргэн.
             SignerCert = Pem(Str(c, "signer") == "seal" ? "seal.pem" : "citizen.pem"),
+            // golden v13: "sealQr": true = QR-тэй тамганы дардас (APPEARANCE_SPEC.md §6.5) — Prepare-ийн нийтийн бус сонголт.
+            SealQr = c.TryGetProperty("sealQr", out var sq) && sq.GetBoolean(),
             Chain = new[] { Pem("04.pem"), Pem("03.pem"), Pem("02.pem") },
             SignerName = Str(p, "signerName"),
             Reason = Str(p, "reason"),
@@ -243,6 +245,78 @@ public class GoldenTests
         AssertSameBytes(Fixtures.Read("output", name + ".pdf"), done.Pdf, name);
         Assert.Equal(Str(exp, "outSha256"), done.OutSha256);
         Assert.Equal(JsonSerializer.Deserialize<Placement>(exp.GetProperty("placement").GetRawText()), done.Placement);
+    }
+
+    /// <summary>
+    /// golden v13 (APPEARANCE_SPEC.md §6.5/§6.6; Go TestSealPDFQRMatchesGolden, here through the full Complete): the public
+    /// <c>SealAsync</c> with <see cref="SealOptions.Qr"/> and the reserving delegate reproduces every QR seal case byte for byte
+    /// (no private key — the delegate checks the DTBS and returns expect.signature). The reservation is (expect.docId,
+    /// expect.revIndex) — docId from the options, the citizen's verify page or the earlier QR seal stamp — and
+    /// <see cref="Completed.SealRegistration"/> carries the same docId/revIndex and the file hashes.
+    /// </summary>
+    [Theory]
+    [InlineData("seal-qr-visible")]
+    [InlineData("seal-qr-visible-en")]
+    [InlineData("seal-qr-rotated90")]
+    [InlineData("citizen-then-seal-qr")]
+    [InlineData("seal-qr-then-seal-qr")]
+    public async Task SealAsyncQrMatchesGoReference(string name)
+    {
+        var c = Case(name);
+        var p = c.GetProperty("prepare");
+        var exp = c.GetProperty("expect");
+        Assert.Equal("seal", Str(c, "signer"));
+        Assert.True(c.GetProperty("sealQr").GetBoolean());
+        var ap = p.GetProperty("appearance");
+        using var http = new HttpClient(new Replay());
+        var nonce = SHA256.HashData(Encoding.UTF8.GetBytes("golden-nonce:" + name).Append((byte)0).ToArray())[..8];
+        SealReservation? reserved = null;
+        var input = Input(c);
+        var done = await EidPades.SealAsync(input, new SealOptions
+        {
+            SealCert = Pem("seal.pem"),
+            Chain = new[] { Pem("04.pem"), Pem("03.pem"), Pem("02.pem") },
+            Reason = Str(p, "reason"),
+            SigningTime = Time("signingTime"),
+            DocId = Str(p, "docId"),
+            Qr = true,
+            Appearance = new Appearance
+            {
+                Page = ap.TryGetProperty("page", out var pg) ? pg.GetInt32() : 0,
+                X = ap.GetProperty("x").GetDouble(),
+                Y = ap.GetProperty("y").GetDouble(),
+                Width = ap.GetProperty("width").GetDouble(),
+                Height = ap.GetProperty("height").GetDouble(),
+                Lang = Str(ap, "lang") ?? Str(p, "lang"),
+            },
+        }, (dtbs, reservation, _) =>
+        {
+            reserved = reservation;
+            Assert.Equal(Str(exp, "dtbs"), Hex(dtbs));
+            return Task.FromResult(Convert.FromHexString(Str(exp, "signature")!));
+        }, new CompleteOptions
+        {
+            TsaUrl = "http://tsa.pki.test/",
+            Roots = new[] { Pem("root.pem") },
+            HttpClient = http,
+            TimeProvider = new FixedTime(Time("now")),
+            NonceSource = () => nonce,
+            Sleep = (_, _) => Task.CompletedTask,
+        });
+        AssertSameBytes(Fixtures.Read("output", name + ".pdf"), done.Pdf, name);
+        Assert.Equal(Str(exp, "outSha256"), done.OutSha256);
+        Assert.Equal(new SealReservation(Str(exp, "docId")!, exp.GetProperty("revIndex").GetInt32()), reserved);
+        var reg = done.SealRegistration!;
+        reg.Validate();
+        Assert.Equal(reserved!.DocId, reg.DocId);
+        Assert.Equal(reserved.RevIndex, reg.RevIndex);
+        Assert.Equal(Fixtures.Sha(input), reg.InSha256);
+        Assert.Equal(Str(exp, "outSha256"), reg.OutSha256);
+        Assert.Equal(Str(exp, "sigRevSha256"), reg.SigRevSha256);
+        Assert.Equal(Str(exp, "cmsSha256"), Fixtures.Sha(reg.Cms));
+        var prior = exp.TryGetProperty("priorCmsSha256", out var pr) ? pr.EnumerateArray().Select(x => x.GetString()!).ToArray() : null;
+        Assert.Equal(prior, reg.PriorCmsSha256?.ToArray());
+        Assert.Equal(PriorRevisions(c), reg.PriorSignatures.Select(x => x.RevisionSha256).ToArray());
     }
 
     /// <summary>expect.suggestion (Go pades.Suggestion JSON) ↔ PlacementSuggestion, field-for-field (numbers as JSON numbers).</summary>

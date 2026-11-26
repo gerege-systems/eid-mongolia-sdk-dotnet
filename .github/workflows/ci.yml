@@ -81,7 +81,7 @@ jobs:
 
   conformance-sync:
     # testdata/conformance нь build/go-sdk-conformance.ref дээрх eid-mongolia-sdk-go testdata/conformance-тэй
-    # (rp-conformance/1, pki/keys-гүй) байт-ижил; бүх тохиолдлыг ConformanceTests (test job) ажиллуулна.
+    # (rp-conformance/2, pki/keys-гүй) байт-ижил; бүх тохиолдлыг ConformanceTests (test job) ажиллуулна.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

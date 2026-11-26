@@ -194,6 +194,28 @@ Error codes: `PdfErrorCodes`.
   Completed stamped = await EidPades.SealAsync(pdf, new SealOptions { SealCert = cert.Certificate, Reason = "Organisation seal" },
       async (dtbs, ct) => (await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)).Signature, cancellationToken: ct);
   ```
+
+  **QR seal stamp and CA registration** (CA V158, same as Go/TS): `SealOptions.Qr = true` draws the
+  `https://ca.eidmongolia.mn/verify/<docId>/<revIndex>` QR in the stamp; it needs the reserving delegate (`SealReservation`) —
+  a reservation arrives only when the QR stamp is actually drawn, then call `client.Seal.SealForDocumentAsync`. Register
+  `done.SealRegistration` within 7 days with `client.Seal.RegisterSealedPdfAsync` (an organisation row on `/verify/{docId}`;
+  201 → `Created`, an identical retry is 200; on 409 `PRIOR_MISMATCH` the SDK retries the prior-row combinations itself). A
+  QR-less seal can be registered too (`done.SealRegistration` is set whenever the docId is known). Error codes:
+  `SealRegisterErrorCodes.All` (CA order; `EidSealNotFoundException`, `EidSealDocMismatchException`,
+  `EidDocIdReservedException`).
+
+  ```csharp
+  Completed done = await EidPades.SealAsync(pdf, new SealOptions
+  {
+      SealCert = cert.Certificate,
+      Qr = true,                    // DocId = null: random on a new document; on a signed one from the verify page / QR stamp
+      FileName = "Invoice.pdf",     // the name shown on /verify (not written into the PDF)
+  }, async (dtbs, reservation, ct) => (reservation is null
+      ? await client.Seal.SealAsync(orgEtsi, dtbs, ct: ct)
+      : await client.Seal.SealForDocumentAsync(orgEtsi, dtbs, reservation.DocId, reservation.RevIndex, ct)).Signature,
+      cancellationToken: ct);
+  PdfSignatureRegistered reg = await client.Seal.RegisterSealedPdfAsync(orgEtsi, done.SealRegistration!, ct);
+  ```
 - **USB token** — `client.Token.IssueCertificateAsync` / `PreviewCertificateAsync` / `CertificateResultAsync` /
   `CertificateInfoAsync`, `TokenService.VerifyTokenCertificates`, token authentication `AuthChallengeAsync` → sign on the
   token → `AuthVerifyAsync` (checks the digest, signature and chain locally before calling the CA),
@@ -246,7 +268,16 @@ app.MapEidLogin("/auth/eid", async (http, id) =>
 (a) run `UseForwardedHeaders` with `KnownProxies` / `KnownNetworks` before `MapEidLogin` as above, or (b) set
 `o.ClientIp = EidLoginClientIp.Forwarded(n)` (n = the number of trusted proxies; the n-th `X-Forwarded-For` value from the
 right). With neither, all users share the proxy's single IP limit; never use `Forwarded(n)` without a proxy (the header can
-be forged). IPv6 clients are keyed by their /64 prefix (`start:2001:db8:1:2::/64`).
+be forged). IPv6 clients are keyed by their /64 prefix (`start:2001:db8:1:2::/64`); with `ClientIp` configured, an unknown IP
+is not unlimited but the shared `start:unknown` bucket. Push keys are `push:<pushKey>` (the `AuditKey` HMAC, the same as
+`OnEvent` `meta.pushKey`) — the national ID never reaches the limiter or a `RateLimit` hook. The in-memory limiter keeps at
+most `EidLoginRateRule.MaxKeys` keys per kind (default 10 000); when full, new keys share one overflow bucket (never refused
+outright, existing counters never evicted).
+
+**Cookie.** The default name is `__Host-eid_login` (Secure, no `CookieDomain`, `CookiePath` = `/` — browsers reject a cookie of
+that name planted from a sibling host); with `InsecureCookie`, a `CookieDomain` or another `CookiePath` it is `eid_login`; a
+`CookieName` you set is used as given. A request carrying more than one cookie of that name has no login cookie (status →
+`EXPIRED`, callback → `eid_error=expired`).
 
 Security matches Go `eidlogin` / TS `createEidLogin`: state on the server (`IEidLoginStore`; default `MemoryEidLoginStore` —
 one process, at most 10 000 entries; with several instances register your own store, e.g. Redis, BEFORE `AddEidMongolia`),
@@ -255,7 +286,7 @@ constant time), `Sec-Fetch-Site` cross-site → 403, limits (start: 20 per 60 s 
 sessions for unregistered numbers + a 1 s push floor, `OnSuccess` only after ValidateAuth + OCSP (**soft-fail by default**,
 see «Revocation» above) and only once, an audit `OnEvent` (an HMAC pushKey instead of the national ID). The response shapes
 and the 12 error codes are checked against the cross-SDK corpus `testdata/conformance/eidlogin/scenarios.json`
-(24 scenarios). For other frameworks call `EidLoginHandler` directly (`EidLoginRequest` — method, URL, headers, body,
+(34 scenarios, eidlogin/2). For other frameworks call `EidLoginHandler` directly (`EidLoginRequest` — method, URL, headers, body,
 `RemoteIp`).
 
 ## "My QR" — the citizen's "My info" (`GeregeSystems.EidMongolia.Qr`)
@@ -564,8 +595,9 @@ string json = rep.ToJson();
 | «Sign in with eID» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / registration body | ✓ | ✓ | ✓ |
 | Full PDF validator (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
-| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator and `Prepare` docId) | validator ✓; `Prepare` — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
-| Seal registration (`POST /seal/{org}/registrations`) | — | — | — |
+| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator, `SealAsync` and `Prepare` docId) | ✓ main | ✓ v0.31.0 | ✓ 0.49.0 |
+| Seal registration (`POST /seal/{org}/registrations`), `SealForDocument` | ✓ main | ✓ main | ✓ main |
+| Cross-SDK corpus rp-conformance/2 (validator, OCSP, login backend) | ✓ main | ✓ main | ✓ main |
 | `pdfDigest`, browser entry, `convert` | — | — | ✓ (TS only) |
 
 ## Development
@@ -583,7 +615,7 @@ string json = rep.ToJson();
   `SuggestPlacement` for every visible golden case (every `expect.suggestion` field, `suggestionError`).
 - Font (`Assets/`): Noto Sans subset, SIL OFL 1.1 — the same bytes as the Go reference's `pades/assets/fonts`.
 - The PDF reader/writer repeats the semantics of digitorus/pdf (BSD-3) and digitorus/pdfsign (BSD-2) — licenses in `Pdf/LICENSE.*`.
-- RP SDK: `testdata/conformance` = a byte-identical copy of the Go repo's `testdata/conformance` (rp-conformance/1)
+- RP SDK: `testdata/conformance` = a byte-identical copy of the Go repo's `testdata/conformance` (rp-conformance/2)
   (`./build/sync-conformance.sh`; CI `conformance-sync`); tests `tests/GeregeSystems.EidMongolia.Tests` and
   `tests/GeregeSystems.EidMongolia.AspNetCore.Tests` (`net8.0` + `net10.0`); `build/compat` — binary compatibility with
   Pades 0.16.0 (CI `compat`); `build/check-packages.sh` — metadata and dependencies of the three packages (CI `pack`).

@@ -41,7 +41,7 @@ public class PdfTests
 
     internal static IEnumerable<string> JsonNames(Type t) =>
         t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() is null)
+            .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always })
             .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? p.Name);
 
     [Fact]

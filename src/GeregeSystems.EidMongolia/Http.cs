@@ -53,6 +53,9 @@ internal sealed class EidHttp
         [EidErrorCodes.AuthSessionNotFound] = (s, b, c, sv, r, h) => new EidAuthSessionNotFoundException(s, b, c, sv, r, h),
         [EidErrorCodes.SealGrantAlreadyApproved] = (s, b, c, sv, r, h) => new EidSealGrantAlreadyApprovedException(s, b, c, sv, r, h),
         [EidErrorCodes.SealGrantNotFound] = (s, b, c, sv, r, h) => new EidSealGrantNotFoundException(s, b, c, sv, r, h),
+        [EidErrorCodes.SealNotFound] = (s, b, c, sv, r, h) => new EidSealNotFoundException(s, b, c, sv, r, h),
+        [EidErrorCodes.SealDocMismatch] = (s, b, c, sv, r, h) => new EidSealDocMismatchException(s, b, c, sv, r, h),
+        [EidErrorCodes.DocIdReserved] = (s, b, c, sv, r, h) => new EidDocIdReservedException(s, b, c, sv, r, h),
         [EidErrorCodes.RpNotActive] = (s, b, c, sv, r, h) => new EidRpNotActiveException(s, b, c, sv, r, h),
         [EidErrorCodes.RpPermissionsFull] = (s, b, c, sv, r, h) => new EidRpPermissionsFullException(s, b, c, sv, r, h),
     };
