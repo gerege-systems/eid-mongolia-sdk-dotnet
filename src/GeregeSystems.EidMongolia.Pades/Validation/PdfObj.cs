@@ -84,6 +84,9 @@ internal sealed class PdfBudget
     public const int MaxInflate = 64 << 20;
 
     public int Nodes = MaxNodes;
+
+    /// <summary>Дуудагчийн цуцлалт — Node() бүр 4096 зангилаа тутамд шалгана (хязгаартай ч урт ажлыг тасална).</summary>
+    public System.Threading.CancellationToken Ct;
     public long Inflate = MaxInflate;
     public readonly Dictionary<(long Off, long Idx), CachedObj> Objs = new();
     public readonly Dictionary<long, ObjStm> Stms = new();
@@ -91,6 +94,7 @@ internal sealed class PdfBudget
     public void Node()
     {
         if (--Nodes < 0) throw PdfObjException.Limit();
+        if ((Nodes & 0xfff) == 0) Ct.ThrowIfCancellationRequested();
     }
 
     /// <summary>xref/object stream-ийн агуулга: filter-гүй эсвэл ганц FlateDecode (+ PNG predictor).</summary>

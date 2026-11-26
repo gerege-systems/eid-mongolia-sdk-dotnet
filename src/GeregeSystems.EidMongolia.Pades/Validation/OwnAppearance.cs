@@ -87,7 +87,7 @@ internal static class OwnAppearance
             {
                 bodies = SignatureAppearance.Objects(new AppearanceParams(w, h, rot, name, role, lang, date, url, seal), uids, sealQr: seal && url != "");
             }
-            catch (Exception e) when (e is not OperationCanceledException)
+            catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
             {
                 throw Fail();
             }

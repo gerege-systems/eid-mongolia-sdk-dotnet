@@ -14,3 +14,16 @@
   `build/go-sdk-validate.ref` = Go v0.31.0, CI `validate-sync`).
 - **Шалгасан:** корпусын бүх тохиолдол (Go-ийн тайлантай deep-equal), SHA256SUMS, зорилтот сөрөг/fuzz тест — PR CI (windows +
   ubuntu).
+
+### Fixed — халдагчийн PDF-ийн DoS (PR #51 review; Prepare/Seal-д ч хамаарна)
+
+- `Pdf/Structure.cs`: Go 900de73 (v0.21.1)-ийн порт — тайлбар/мөр дэх `/Encrypt` бичвэр ObjStm-ийн шалгалтыг унтраахгүй;
+  `/Filter [/FlateDecode /FlateDecode]` (2+ шүүлтүүр) → бүтцийн алдаа; давхар/`null` `/Filter` — сүүлийнх нь (уншигчтай ижил).
+- `Pdf/Lexer.cs`: ReadObject/ReadArray/ReadDict-ийн рекурсын гүн ≤ 512 → `PdfFormatException` (PDF_INVALID), StackOverflow биш.
+- `Pdf/PdfDocument.cs`: ObjStm-ийн `/N` давталт өгөгдлийн төгсгөлд зогсоно; xref `/Prev` гинж ≤ 128; нэг нээлтэд FlateDecode
+  нийт ≤ 256 MiB; xref stream / ObjStm-д олон шүүлтүүр хориотой.
+- ValidatePdf: CMS-д ≤ 32 гэрчилгээ, гэрчилгээний pool хэшээр; RSA ≤ 8192 бит, e ≤ 2^32−1; RSA-PSS SHA-1 татгалзана (Go-тэй
+  ижил); гэрчилгээний нэрийг задлалтад шалгана (гэмтсэн бол тэр гарын үсэг `malformed_signature`); DSS-ийн нийт ≤ 8 MiB,
+  объектын давхардалгүй, OCSP/CRL-ийг баримтад нэг удаа шалгана; задлах үе шатны бүх алдаа PDF_INVALID (OOM ба цуцлалтыг
+  дамжуулна); бүтцийн шалгалт ба revision-ийн шинжилгээ CancellationToken-ийг дагана; `platform_attested` зөвхөн
+  өөрчлөгдөөгүй баримтад (Go/TS-д мөн оруулах санал).

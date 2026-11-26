@@ -349,6 +349,11 @@ public static partial class EidPades
                 _ => new EidPadesException("PDF_INVALID", "PDF задарсангүй", e),
             };
         }
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // TS validate.ts: задлах үе шатны бусад бүх алдаа PDF_INVALID (OOM ба цуцлалтыг дамжуулна).
+            throw new EidPadesException("PDF_INVALID", "PDF задарсангүй", e);
+        }
 
         var now = GoTime.FromDateTimeOffset(o.Time ?? DateTimeOffset.UtcNow);
         RawDss? dss = null;
@@ -380,7 +385,7 @@ public static partial class EidPades
                     s = await ev.EvaluateSignatureAsync(r, cancellationToken).ConfigureAwait(false);
                     if (s.ChainTrusted && r.Leaf is not null && Evaluator.SignLevelOf(ValCert.Parse(r.Leaf)) is { } lvl) s.CertificateLevel = lvl;
                 }
-                catch (Exception e) when (e is not OperationCanceledException && e is not EidPadesException)
+                catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException and not EidPadesException)
                 {
                     // Go: v.ValidatePDF алдаа → PDF_INVALID «шалгаж чадсангүй» (халдагчийн өгөгдлөөс гарсан гэнэтийн алдаа crash биш).
                     throw new EidPadesException("PDF_INVALID", "шалгаж чадсангүй", e);

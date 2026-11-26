@@ -115,18 +115,15 @@ internal sealed class Evaluator
     private sealed class CertPool
     {
         private readonly List<ValCert> _list = new();
+        private readonly HashSet<string> _ids = new(StringComparer.Ordinal);
 
+        // Байт-ижил гэрчилгээг хэшээр нэг удаа (O(n), олон давхардсан гэрчилгээгээр O(n²) биш).
         public void Add(ValCert c)
         {
-            if (!Contains(c)) _list.Add(c);
+            if (_ids.Add(c.Id)) _list.Add(c);
         }
 
-        public bool Contains(ValCert c)
-        {
-            foreach (var x in _list)
-                if (x.Raw.AsSpan().SequenceEqual(c.Raw)) return true;
-            return false;
-        }
+        public bool Contains(ValCert c) => _ids.Contains(c.Id);
 
         /// <summary>Go findPotentialParents: AKID=SKID → нэг нь алга → зөрсөн.</summary>
         public List<ValCert> Parents(ValCert c)
@@ -264,7 +261,7 @@ internal sealed class Evaluator
         {
             st = await _status.CertStatusAsync(c, chain[1], at, ct).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception e) when (e is not OutOfMemoryException && (e is not OperationCanceledException || !ct.IsCancellationRequested))
         {
             return (info, null);
         }
@@ -390,7 +387,8 @@ internal sealed class Evaluator
         {
             s.ProblemList.Add(ProblemRevocationUnknown);
         }
-        if (trusted && info.IssuedByEid && info.Usage == "document_signer" && !s.ProblemList.Contains(ProblemRevoked))
+        // .NET-ийн нэмэлт (Go/TS-д алга, корпуст нөлөөгүй): өөрчлөгдсөн баримтын /Name-ийг платформын баталсан гэж харуулахгүй.
+        if (trusted && info.IssuedByEid && info.Usage == "document_signer" && !s.ProblemList.Contains(ProblemRevoked) && (r.CoversWhole || r.LaterSignaturesOnly))
         {
             s.SignerName = r.SignerName;
             s.SignerNameSource = "platform_attested";
@@ -516,54 +514,35 @@ internal sealed class Evaluator
     private static LtvInfo LtvCoverage(RawDss? dss, GoTime at, GoTime now, List<ValCert>[] chains)
     {
         var o = new LtvInfo();
-        var crls = new List<ValCrl>();
-        foreach (var der in dss?.Crls ?? new List<byte[]>())
-            if (ValRevocation.ParseCrl(der) is { } c) crls.Add(c);
-        var seen = new List<byte[]>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var chain in chains)
         {
             for (int i = 0; i + 1 < chain.Count; i++)
             {
                 var cert = chain[i];
                 var issuer = chain[i + 1];
-                bool dup = false;
-                foreach (var x in seen)
-                {
-                    if (x.AsSpan().SequenceEqual(cert.Raw))
-                    {
-                        dup = true;
-                        break;
-                    }
-                }
-                if (dup) continue;
-                seen.Add(cert.Raw);
-                if (!Covered(cert, issuer, at, now, dss?.Ocsps ?? new List<byte[]>(), crls)) o.MissingList.Add(GoFmt.CommonName(cert.RawSubject));
+                if (!seen.Add(cert.Id)) continue;
+                if (dss is null || !Covered(cert, issuer, at, now, dss)) o.MissingList.Add(GoFmt.CommonName(cert.RawSubject));
             }
         }
         o.Complete = o.MissingList.Count == 0 && seen.Count > 0;
         return o;
     }
 
-    private static bool Covered(ValCert cert, ValCert issuer, GoTime at, GoTime now, List<byte[]> ocsps, List<ValCrl> crls)
+    private static bool Covered(ValCert cert, ValCert issuer, GoTime at, GoTime now, RawDss dss)
     {
-        foreach (var der in ocsps)
+        for (int k = 0; k < dss.Ocsps.Count; k++)
         {
-            ValOcspResp resp;
-            try
-            {
-                resp = ValRevocation.ParseOcsp(der, cert.SerialValue, issuer);
-            }
-            catch (Exception e) when (ValRevocation.IsParse(e))
-            {
-                continue;
-            }
-            if (resp.Status != "good" || !ValRevocation.OcspCertIdMatches(der, cert, issuer)) continue;
+            if (dss.OcspPlain(k, cert, issuer) is not { } resp) continue;
+            if (resp.Status != "good" || !ValRevocation.OcspCertIdMatches(dss.Ocsps[k], cert, issuer)) continue;
             if (resp.Certificate is { } rc && !rc.Raw.AsSpan().SequenceEqual(issuer.Raw) && rc.Extension(OidOcspNoCheck) is null) continue;
             if (ValRevocation.OcspFreshAt(resp, at, now)) return true;
         }
-        foreach (var crl in crls)
+        for (int k = 0; k < dss.Crls.Count; k++)
         {
-            if (!ValRevocation.CrlFor(crl, cert, issuer) || !ValRevocation.FreshAt(crl.ThisUpdate, crl.NextUpdate, at, now)) continue;
+            if (!dss.CrlFor(k, cert, issuer)) continue;
+            var crl = dss.Crl(k)!;
+            if (!ValRevocation.FreshAt(crl.ThisUpdate, crl.NextUpdate, at, now)) continue;
             if (ValRevocation.CrlListed(crl, cert) is not null) continue;
             return true;
         }
@@ -643,19 +622,21 @@ internal sealed class DssStatus : IStatusSource
             if (revoked is not { } r || GoTime.Before(t, r)) revoked = t;
         }
         bool good = false;
-        foreach (var der in _dss?.Ocsps ?? new List<byte[]>())
+        int nOcsp = _dss?.Ocsps.Count ?? 0;
+        for (int k = 0; k < nOcsp; k++)
         {
             ct.ThrowIfCancellationRequested();
-            var resp = OcspFor(der, cert, issuer);
+            var resp = _dss!.OcspFor(k, cert, issuer);
             if (resp is null) continue;
             if (resp.Status == "revoked") MarkRevoked(GoTime.FromPrecise(resp.RevokedAt!.Value));
             else if (resp.Status == "good") good = good || ValRevocation.OcspFreshAt(resp, at, _now);
         }
-        foreach (var der in _dss?.Crls ?? new List<byte[]>())
+        int nCrl = _dss?.Crls.Count ?? 0;
+        for (int k = 0; k < nCrl; k++)
         {
             ct.ThrowIfCancellationRequested();
-            var crl = ValRevocation.ParseCrl(der);
-            if (crl is null || !ValRevocation.CrlFor(crl, cert, issuer)) continue;
+            if (!_dss!.CrlFor(k, cert, issuer)) continue;
+            var crl = _dss.Crl(k)!;
             if (ValRevocation.CrlListed(crl, cert) is { } t) MarkRevoked(t);
             else good = good || ValRevocation.FreshAt(crl.ThisUpdate, crl.NextUpdate, at, _now);
         }
@@ -701,7 +682,7 @@ internal sealed class OnlineStatus : IStatusSource
     }
 
     /// <summary>Нэг URL-ийн алдаа (сүлжээ, timeout, HTTP) — дараагийн URL руу; дуудагчийн цуцлалт биш.</summary>
-    private static bool Soft(Exception e, CancellationToken ct) => !(e is OperationCanceledException && ct.IsCancellationRequested);
+    private static bool Soft(Exception e, CancellationToken ct) => e is not OutOfMemoryException && !(e is OperationCanceledException && ct.IsCancellationRequested);
 
     private async Task<CertStatusResult?> OcspAsync(ValCert cert, ValCert issuer, CancellationToken ct)
     {

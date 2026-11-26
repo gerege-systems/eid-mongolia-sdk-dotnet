@@ -36,6 +36,58 @@ internal sealed class RawDss
     public List<byte[]> Certs = new();
     public List<byte[]> Ocsps = new();
     public List<byte[]> Crls = new();
+
+    // Баримт бүрт OCSP/CRL-ийг нэг удаа задалж, (нотолгоо, гэрчилгээ, олгогч) бүрийн гарын үсгийн шалгалтыг нэг удаа хийнэ —
+    // олон гарын үсэг × гинж × DSS-ийн зүйлийн давталтаар ажлыг өсгөхгүй.
+    private List<ValCrl?>? _crls;
+    private readonly Dictionary<(int, string, string), ValOcspResp?> _plain = new();
+    private readonly Dictionary<(int, string, string), ValOcspResp?> _for = new();
+    private readonly Dictionary<(int, string, string), bool> _crlFor = new();
+
+    public ValCrl? Crl(int i)
+    {
+        _crls ??= Crls.ConvertAll(ValRevocation.ParseCrl);
+        return _crls[i];
+    }
+
+    /// <summary>ParseOcsp(der, cert.serial, issuer) эсвэл задрахгүй бол null (LTV хамралт).</summary>
+    public ValOcspResp? OcspPlain(int i, ValCert cert, ValCert issuer)
+    {
+        var key = (i, cert.Id, issuer.Id);
+        if (_plain.TryGetValue(key, out var hit)) return hit;
+        ValOcspResp? r;
+        try
+        {
+            r = ValRevocation.ParseOcsp(Ocsps[i], cert.SerialValue, issuer);
+        }
+        catch (Exception e) when (ValRevocation.IsParse(e))
+        {
+            r = null;
+        }
+        _plain[key] = r;
+        return r;
+    }
+
+    /// <summary>DssStatus.OcspFor-ийн кэштэй хувилбар.</summary>
+    public ValOcspResp? OcspFor(int i, ValCert cert, ValCert issuer)
+    {
+        var key = (i, cert.Id, issuer.Id);
+        if (_for.TryGetValue(key, out var hit)) return hit;
+        var r = DssStatus.OcspFor(Ocsps[i], cert, issuer);
+        _for[key] = r;
+        return r;
+    }
+
+    /// <summary>ValRevocation.CrlFor-ийн кэштэй хувилбар (задрахгүй CRL — false).</summary>
+    public bool CrlFor(int i, ValCert cert, ValCert issuer)
+    {
+        var key = (i, cert.Id, issuer.Id);
+        if (_crlFor.TryGetValue(key, out var hit)) return hit;
+        var crl = Crl(i);
+        bool ok = crl is not null && ValRevocation.CrlFor(crl, cert, issuer);
+        _crlFor[key] = ok;
+        return ok;
+    }
 }
 
 /// <summary>Go/TS RawSignature.</summary>
@@ -82,6 +134,8 @@ internal static class Extract
     private const int MaxSignatures = 16;
     private const int MaxDssItems = 64;
     private const int MaxDssStream = 1 << 20;
+    private const int MaxCmsCerts = 32;
+    private const int MaxDssTotal = 8 << 20;
 
     private const string OidSignedData = "1.2.840.113549.1.7.2";
     private const string OidMessageDigest = "1.2.840.113549.1.9.4";
@@ -117,10 +171,11 @@ internal static class Extract
         // Уншигчийн рекурс хязгааргүй — гүн давхарласан баримтыг задлахаас өмнө (Go CheckStructure).
         try
         {
-            Structure.Check(doc);
+            Structure.Check(doc, ct);
         }
-        catch (PdfStructureException e)
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
+            // PdfStructureException эсвэл бүтцийн шалгагчийн гэнэтийн алдаа — аль аль нь PDF_INVALID (TS validate.ts).
             throw new ExtractException("structure", e);
         }
         PdfDocument rdr;
@@ -128,7 +183,7 @@ internal static class Extract
         {
             rdr = PdfDocument.Open(doc);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
             throw new ExtractException(Structure.EncryptRef.IsMatch(Latin1.FromBytes(doc)) ? "encrypted" : "not_pdf", e);
         }
@@ -176,7 +231,7 @@ internal static class Extract
         {
             throw;
         }
-        catch (Exception e)
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
             throw new ExtractException("not_pdf", e); // Go: panic → recover → ErrNotPDF
         }
@@ -204,7 +259,7 @@ internal static class Extract
         {
             ct.ThrowIfCancellationRequested();
             if (s.Malformed || s.CoversWhole) continue;
-            revs ??= new Revisions(doc, known, ownProfile: true) { Sigs = metas, DocId = docId };
+            revs ??= new Revisions(doc, known, ownProfile: true, ct) { Sigs = metas, DocId = docId };
             var later = revs.Later(s.SignedEnd);
             s.LaterSignaturesOnly = later.SignaturesOnly;
             s.LaterSignatures = later.Signatures;
@@ -281,9 +336,9 @@ internal static class Extract
 
     // ── PKCS#7 (digitorus/pkcs7-ийн хэрэгтэй дэд хэсэг) ──
 
-    private sealed record Attr(string Type, ReadOnlyMemory<byte> Values);
+    internal sealed record Attr(string Type, ReadOnlyMemory<byte> Values);
 
-    private sealed class SignerInfo
+    internal sealed class SignerInfo
     {
         public byte[] Issuer = Array.Empty<byte>();
         public BigInteger Serial;
@@ -295,7 +350,7 @@ internal static class Extract
         public List<Attr> UnauthAttrs = new();
     }
 
-    private sealed class Pkcs7
+    internal sealed class Pkcs7
     {
         public byte[] Content = Array.Empty<byte>();
         public List<ValCert> Certs = new();
@@ -305,7 +360,7 @@ internal static class Extract
     private static bool IsParse(Exception e) => ValRevocation.IsParse(e);
 
     /// <summary>digitorus pkcs7.Parse: эхний TLV — ContentInfo{SignedData}; гэрчилгээ бүр задрах ёстой.</summary>
-    private static Pkcs7? ParsePkcs7(ReadOnlyMemory<byte> data)
+    internal static Pkcs7? ParsePkcs7(ReadOnlyMemory<byte> data)
     {
         try
         {
@@ -335,7 +390,10 @@ internal static class Extract
             var p7 = new Pkcs7 { Content = content };
             if (Asn1.At(sd, i)?.Tag == 0xa0)
             {
-                foreach (var c in Asn1.Children(sd[i])) p7.Certs.Add(ValCert.Parse(c.Raw));
+                var certNodes = Asn1.Children(sd[i]);
+                // Хууль ёсны CMS-д ≤ ~6 гэрчилгээ; хязгааргүй жагсаалт гинжийн угсралтыг O(n²) болгоно — fail-closed (malformed).
+                if (certNodes.Count > MaxCmsCerts) return null;
+                foreach (var c in certNodes) p7.Certs.Add(ValCert.Parse(c.Raw));
                 i++;
             }
             if (Asn1.At(sd, i)?.Tag == 0xa1) i++;
@@ -386,7 +444,7 @@ internal static class Extract
     }
 
     /// <summary>GetOnlySigner: ганц signer-ийн гэрчилгээ (RawIssuer + serial тоогоор).</summary>
-    private static ValCert? OnlySigner(Pkcs7 p7)
+    internal static ValCert? OnlySigner(Pkcs7 p7)
     {
         if (p7.Signers.Count != 1) return null;
         return FindSigner(p7, p7.Signers[0]);
@@ -830,16 +888,20 @@ internal static class Extract
     private static RawDss? ExtractDss(PdfValue dss, int docLen)
     {
         if (dss.Kind != PdfKind.Dict) return null;
+        // Нэг объектыг олон удаа заасныг нэг удаа (тайлалт, OCSP/CRL шалгалтыг давтахгүй); нийт тайлсан байт ≤ MaxDssTotal.
+        long total = 0;
         List<byte[]> Read(string key)
         {
             var arr = dss.Key(key);
             var o = new List<byte[]>();
+            var seen = new HashSet<ObjPtr>();
             for (int i = 0; i < arr.Len && i < MaxDssItems; i++)
             {
                 var e = arr.Index(i);
-                if (e.Kind != PdfKind.Stream) continue;
+                if (e.Kind != PdfKind.Stream || (e.Ptr != default && !seen.Add(e.Ptr))) continue;
                 var b = StreamData(e, docLen);
-                if (b is null || b.Length > MaxDssStream) continue;
+                if (b is null || b.Length > MaxDssStream || total + b.Length > MaxDssTotal) continue;
+                total += b.Length;
                 o.Add(b);
             }
             return o;

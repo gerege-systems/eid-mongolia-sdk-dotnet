@@ -16,6 +16,14 @@ internal sealed class PdfDocument
     /// <summary>Нэг FlateDecode stream-ийн тайлсан хэмжээний дээд хязгаар (TS reader zlibInflate-тэй ижил).</summary>
     internal const int MaxInflate = 64 << 20;
 
+    /// <summary>Нэг баримт нээх бүрийн нийт FlateDecode тайлалтын төсөв (xref stream, ObjStm, DSS — бүгд хамт).</summary>
+    internal const long MaxDocInflate = 256L << 20;
+
+    /// <summary>xref /Prev гинжийн дээд урт (TS/Go validate-ийн MAX_XREF_SECTIONS-тэй ижил).</summary>
+    private const int MaxXrefSections = 128;
+
+    private long _inflateLeft = MaxDocInflate;
+
     private readonly byte[] _f;
     private readonly Dictionary<ObjPtr, object?> _cache = new();
     private readonly Dictionary<ObjPtr, byte[]> _streamData = new();
@@ -123,6 +131,7 @@ internal sealed class PdfDocument
         {
             if (prevoff is not long off) throw new PdfFormatException("malformed PDF: xref Prev is not integer");
             if (!seen.Add(off)) throw new PdfFormatException("malformed PDF: xref Prev loop detected");
+            if (seen.Count > MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
             if (off < 0 || off >= _f.Length) throw new PdfFormatException("malformed PDF: xref Prev out of range");
             if (new Lexer(_f, (int)off, _f.Length).ReadObject() is not ObjDef { Obj: PdfStream prev })
                 throw new PdfFormatException("malformed PDF: xref prev stream not found");
@@ -155,7 +164,7 @@ internal sealed class PdfDocument
         int wtotal = 0;
         foreach (var x in w) wtotal += x;
 
-        var data = new PdfValue(this, default, strm).StreamBytes();
+        var data = StreamBytes(new PdfValue(this, default, strm), strm, structural: true);
         int p = 0;
         for (int k = 0; k + 1 < index.Count; k += 2)
         {
@@ -208,6 +217,7 @@ internal sealed class PdfDocument
         {
             if (prevoff is not long off) throw new PdfFormatException("malformed PDF: xref Prev is not integer");
             if (!seen.Add(off)) throw new PdfFormatException("malformed PDF: xref Prev loop detected");
+            if (seen.Count > MaxXrefSections) throw new PdfFormatException("malformed PDF: xref Prev chain too long");
             if (off < 0 || off >= _f.Length) throw new PdfFormatException("malformed PDF: xref Prev out of range");
             var pb = new Lexer(_f, (int)off, _f.Length);
             if (pb.ReadToken() is not PdfKeyword { Value: "xref" })
@@ -294,15 +304,20 @@ internal sealed class PdfDocument
         {
             if (strm.Kind != PdfKind.Stream) throw new PdfFormatException("not a stream");
             if (strm.Key("Type").Name != "ObjStm") throw new PdfFormatException("not an object stream");
-            int n = (int)strm.Key("N").Int64;
+            long n = strm.Key("N").Int64;
             long first = strm.Key("First").Int64;
             if (first == 0) throw new PdfFormatException("missing First");
-            var data = strm.StreamBytes();
+            if (strm.Data is not PdfStream objStm) throw new PdfFormatException("not a stream");
+            var data = StreamBytes(strm, objStm, structural: true);
             var b = new Lexer(data, 0, data.Length) { AllowEof = true };
-            for (int i = 0; i < n; i++)
+            for (long i = 0; i < n; i++)
             {
-                long id = b.ReadToken() is long a ? a : 0;
-                long off = b.ReadToken() is long o ? o : 0;
+                // TS reader: /N нь stream-ээс урт бол үлдсэн мөр байхгүй — EOF дээр зогсоно (/N 2147483647 → 2^31 давталт биш).
+                var idTok = b.ReadToken();
+                var offTok = b.ReadToken();
+                if (idTok == Lexer.Eof || offTok == Lexer.Eof) break;
+                long id = idTok is long a ? a : 0;
+                long off = offTok is long o ? o : 0;
                 if ((uint)id == ptr.Id)
                 {
                     long at = first + off;
@@ -318,8 +333,11 @@ internal sealed class PdfDocument
         throw new PdfFormatException("object stream Extends loop");
     }
 
-    /// <summary>Stream-ийн тайлсан агуулга (Go Value.Reader + io.ReadAll).</summary>
-    internal byte[] StreamBytes(PdfValue v, PdfStream s)
+    /// <summary>
+    /// Stream-ийн тайлсан агуулга (Go Value.Reader + io.ReadAll). structural — xref stream / ObjStm: олон шүүлтүүрийн гинжийг
+    /// татгалзана (халдагч FlateDecode-ийг давхарлаж тайлалтыг өсгөхгүй).
+    /// </summary>
+    internal byte[] StreamBytes(PdfValue v, PdfStream s, bool structural = false)
     {
         if (_streamData.TryGetValue(s.Ptr, out var cached) && s.Ptr != default) return cached;
         byte[] raw = RawStreamBytes(v, s).ToArray();
@@ -335,6 +353,7 @@ internal sealed class PdfDocument
                 data = ApplyFilter(data, filter.Name, param);
                 break;
             case PdfKind.Array:
+                if (structural && filter.Len > 1) throw new PdfFormatException("multiple filters on a structural stream");
                 for (int i = 0; i < filter.Len; i++) data = ApplyFilter(data, filter.Index(i).Name, param.Index(i));
                 break;
             default:
@@ -354,7 +373,7 @@ internal sealed class PdfDocument
         return _f.AsSpan((int)start, (int)n);
     }
 
-    private static byte[] ApplyFilter(byte[] data, string name, PdfValue param)
+    private byte[] ApplyFilter(byte[] data, string name, PdfValue param)
     {
         if (name != "FlateDecode") throw new PdfFormatException("unknown filter " + name);
         byte[] inflated;
@@ -368,9 +387,10 @@ internal sealed class PdfDocument
             while ((n = zs.Read(buf, 0, buf.Length)) > 0)
             {
                 ms.Write(buf, 0, n);
-                if (ms.Length > MaxInflate) throw new PdfFormatException("zlib: output over limit");
+                if (ms.Length > MaxInflate || ms.Length > _inflateLeft) throw new PdfFormatException("zlib: output over limit");
             }
             inflated = ms.ToArray();
+            _inflateLeft -= inflated.Length;
         }
         catch (InvalidDataException e)
         {

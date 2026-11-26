@@ -274,6 +274,9 @@ internal static class GoFmt
         return o;
     }
 
+    /// <summary>Name-ийг тайланд хэрэгтэй хэлбэрээр задалж чадах эсэх (буруу бол <see cref="Asn1Exception"/>).</summary>
+    public static void CheckName(ReadOnlyMemory<byte> rawName) => Rdns(rawName);
+
     /// <summary>Go asn1.Marshal(string): PrintableString (зөвшөөрөгдсөн тэмдэгт) эсвэл UTF8String.</summary>
     private static byte[] MarshalString(string s)
     {

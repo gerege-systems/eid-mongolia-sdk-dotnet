@@ -126,7 +126,8 @@ public class ValidatePdfCorpusTests
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         if (c.TryGetProperty("http", out var http))
             foreach (var p in http.EnumerateObject()) files[p.Name] = Read("validate/" + p.Value.GetString()!);
-        using var client = new HttpClient(new Replay(files));
+        var replay = new Replay(files);
+        using var client = new HttpClient(replay);
         bool national = c.TryGetProperty("nationalRoots", out var nr) && nr.GetBoolean();
         var time = c.TryGetProperty("time", out var t) ? DateTimeOffset.Parse(t.GetString()!, CultureInfo.InvariantCulture) : ManifestTime;
         var got = await Run(Read(c.GetProperty("input").GetString()!), new ValidatePdfOptions
@@ -137,6 +138,7 @@ public class ValidatePdfCorpusTests
             Offline = c.GetProperty("offline").GetBoolean(),
             HttpClient = client,
         });
+        if (c.GetProperty("offline").GetBoolean()) Assert.Empty(replay.Requests); // offline — сүлжээ рүү нэг ч хүсэлт үгүй
         var want = JsonNode.Parse(c.GetProperty("expect").GetRawText());
         Assert.True(JsonNode.DeepEquals(want, got), name + "\nwant: " + want!.ToJsonString() + "\ngot:  " + got!.ToJsonString());
     }

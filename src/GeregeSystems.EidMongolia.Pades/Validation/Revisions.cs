@@ -45,8 +45,9 @@ internal sealed class Revisions
     private readonly Dictionary<int, PdfView?> _views = new();
     private readonly Dictionary<(int, int, int), LaterChanges?> _steps = new();
 
-    public Revisions(byte[] doc, Dictionary<int, long[]> known, bool ownProfile)
+    public Revisions(byte[] doc, Dictionary<int, long[]> known, bool ownProfile, System.Threading.CancellationToken ct = default)
     {
+        Budget = new PdfBudget { Ct = ct };
         Doc = doc;
         Known = known;
         OwnProfile = ownProfile;
@@ -57,7 +58,7 @@ internal sealed class Revisions
     /// <summary>Extract-ийн задалж, криптографаар шалгасан гарын үсгүүд: объектын дугаар → ByteRange.</summary>
     public Dictionary<int, long[]> Known { get; }
     public bool OwnProfile { get; }
-    public PdfBudget Budget { get; } = new();
+    public PdfBudget Budget { get; }
     public Dictionary<int, SigMeta> Sigs { get; set; } = new();
     public string DocId { get; set; } = "";
 
@@ -69,7 +70,7 @@ internal sealed class Revisions
         {
             v = PdfView.Open(Doc, n, Budget);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
             v = null;
         }
@@ -84,7 +85,7 @@ internal sealed class Revisions
         {
             return LaterCore(end);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
             return LaterChanges.Nothing;
         }
@@ -117,6 +118,7 @@ internal sealed class Revisions
         int sigSteps = 0;
         for (int i = 1; i < ends.Count; i++)
         {
+            Budget.Ct.ThrowIfCancellationRequested();
             bool hasSig = HasSig(ends[i - 1], ends[i]);
             if (hasSig) sigSteps++;
             var st = Classify(ends[i - 1], ends[i], true, StepMode(hasSig));
@@ -375,7 +377,7 @@ internal sealed class Classifier
             var o = lin.Indirect(null);
             linearized = o.Val is Dictionary<string, object?> ld && P.Get(ld, "Linearized") is not null && P.IfaceEq(P.Get(ld, "L"), (long)Fin.Len);
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
             // Go: задрахгүй бол алгасна
         }

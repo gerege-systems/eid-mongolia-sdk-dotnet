@@ -96,34 +96,30 @@ public class ValidatePdfNegativeTests
     [Fact]
     public async Task AppendedRevisionWithoutSignature_ModifiedAfterSigning()
     {
-        // Shadow-style incremental update: шинэ xref хэсэг Catalog-ийг өөр (гарын үсэггүй) объектоор дахин тодорхойлно.
+        // Shadow-style incremental update: шинэ классик xref хэсэг Catalog-ийг (/Lang нэмж) дахин тодорхойлно — уншигч
+        // баримтыг бүрэн задална (PDF_INVALID биш), ангилагч гарын үсэггүй revision-ийг modified_after_signing гэж үзнэ.
         var doc = Valid();
         var text = Encoding.Latin1.GetString(doc);
         int sx = text.LastIndexOf("startxref", StringComparison.Ordinal);
         var prev = Regex.Match(text[sx..], @"startxref\s+(\d+)").Groups[1].Value;
-        var root = Regex.Matches(text, @"/Root\s+(\d+)\s+(\d+)\s+R").Last();
-        var size = Regex.Matches(text, @"/Size\s+(\d+)").Last().Groups[1].Value;
-        int rootNum = int.Parse(root.Groups[1].Value, CultureInfo.InvariantCulture);
-        var obj = "\n" + rootNum + " 0 obj\n<< /Type /Catalog /Pages 999 0 R >>\nendobj\n";
-        int objOff = doc.Length + 1;
-        var xrefOff = doc.Length + obj.Length;
-        var upd = obj + "xref\n" + rootNum + " 1\n" + objOff.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n\r\n" +
-                  "trailer\n<< /Size " + size + " /Root " + rootNum + " 0 R /Prev " + prev + " >>\nstartxref\n" + xrefOff + "\n%%EOF\n";
+        var trailer = Regex.Matches(text, @"trailer\s*<<(.*?)>>\s*startxref", RegexOptions.Singleline).Last().Groups[1].Value;
+        var root = Regex.Match(trailer, @"/Root\s+(\d+)\s+0\s+R").Groups[1].Value;
+        var size = Regex.Match(trailer, @"/Size\s+(\d+)").Groups[1].Value;
+        var info = Regex.Match(trailer, @"/Info\s+\d+\s+0\s+R").Value;
+        var catalog = Regex.Matches(text, @"(?<![0-9])" + root + @" 0 obj\s*(<<.*?>>)\s*endobj", RegexOptions.Singleline).Last().Groups[1].Value;
+        Assert.StartsWith("<<", catalog);
+        var obj = root + " 0 obj\n<< /Lang (xx)" + catalog[2..] + "\nendobj\n";
+        int objOff = doc.Length;
+        int xrefOff = doc.Length + Encoding.Latin1.GetByteCount(obj);
+        var upd = obj + "xref\n" + root + " 1\n" + objOff.ToString("D10", CultureInfo.InvariantCulture) + " 00000 n\r\n" +
+                  "trailer\n<< /Size " + size + " /Root " + root + " 0 R " + info + " /Prev " + prev + " >>\nstartxref\n" + xrefOff + "\n%%EOF\n";
         var attacked = doc.Concat(Encoding.Latin1.GetBytes(upd)).ToArray();
-        SignatureReport s;
-        try
-        {
-            s = (await EidPades.ValidatePdfAsync(attacked, Opts())).Signatures[0];
-        }
-        catch (EidPadesException e)
-        {
-            // Уншигч шинэ Catalog-ийг задалж чадахгүй бол тайлангүй алдаа — мөн «хүчинтэй» гэж үзэхгүй.
-            Assert.Equal("PDF_INVALID", e.RawCode);
-            return;
-        }
+        var rep = await EidPades.ValidatePdfAsync(attacked, Opts());
+        var s = rep.Signatures[0];
+        Assert.False(s.CoversWholeDocument);
         Assert.False(s.ExtendedBySignaturesOnly);
         Assert.Contains("modified_after_signing", s.Problems);
-        Assert.NotEqual("valid", s.Indication);
+        Assert.Equal("indeterminate", s.Indication);
     }
 
     [Fact]

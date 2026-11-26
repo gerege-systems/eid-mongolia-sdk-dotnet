@@ -51,6 +51,19 @@ internal sealed class ValCert
     /// <summary>RSA modulus-ийн доод хэмжээ (бит) — core <c>ParsedCert.MinRsaBits</c>-тэй ижил.</summary>
     public const int MinRsaBits = 2048;
 
+    /// <summary>RSA modulus-ийн дээд хэмжээ (бит) — халдагчийн асар том түлхүүрээр шалгалтыг удаашруулахгүй.</summary>
+    public const int MaxRsaBits = 8192;
+
+    /// <summary>RSA public exponent ≤ 2^32 − 1 (их бол тэр гэрчилгээ ашиглагдахгүй).</summary>
+    private static bool SmallExponent(RSA rsa)
+    {
+        var e = rsa.ExportParameters(false).Exponent;
+        if (e is null) return false;
+        int i = 0;
+        while (i < e.Length && e[i] == 0) i++;
+        return e.Length - i <= 4;
+    }
+
     private ValCert()
     {
     }
@@ -89,6 +102,11 @@ internal sealed class ValCert
     public GoTime NotAfterGo => GoTime.FromUnixMs(NotAfter.UnixMs);
 
     public BigInteger SerialValue => Asn1.IntValue(Serial);
+
+    private string? _id;
+
+    /// <summary>DER-ийн SHA-256 hex — кэш/давхардлын түлхүүр.</summary>
+    public string Id => _id ??= Asn1.Hex(Asn1.Digest("SHA-256", Raw));
 
     public ReadOnlyMemory<byte>? Extension(string oid)
     {
@@ -167,6 +185,10 @@ internal sealed class ValCert
                 NotBefore = Asn1.ParsePreciseTime(Asn1.At(validity, 0) ?? throw new Asn1Exception("validity")),
                 NotAfter = Asn1.ParsePreciseTime(Asn1.At(validity, 1) ?? throw new Asn1Exception("validity")),
             };
+            // Subject/Issuer-ийг энд задална: тайлангийн нэр (NameString) хожим унавал баримт бүхэлдээ биш энэ гарын үсэг л
+            // malformed_signature болно.
+            GoFmt.CheckName(c.RawSubject);
+            GoFmt.CheckName(c.RawIssuer);
             c.Extensions.AddRange(exts);
             foreach (var e in exts) c.ParseExtension(e);
             return c;
@@ -362,10 +384,11 @@ internal sealed class ValCert
             if (KeyAlg != OidRsaEncryption) return false;
             using var rsa = RSA.Create();
             rsa.ImportSubjectPublicKeyInfo(Spki, out _);
-            if (rsa.KeySize < MinRsaBits) return false;
+            if (rsa.KeySize < MinRsaBits || rsa.KeySize > MaxRsaBits || !SmallExponent(rsa)) return false;
             if (sch.Kind == "pss")
             {
-                if (sch.Salt != HashLen(sch.Hash)) return false;
+                // Go x509: PSS зөвхөн SHA-256/384/512, saltLength = hLen.
+                if (sch.Hash == HashAlgorithmName.SHA1 || sch.Salt != HashLen(sch.Hash)) return false;
                 return rsa.VerifyData(data, sig, sch.Hash, RSASignaturePadding.Pss);
             }
             return rsa.VerifyData(data, sig, sch.Hash, RSASignaturePadding.Pkcs1);
