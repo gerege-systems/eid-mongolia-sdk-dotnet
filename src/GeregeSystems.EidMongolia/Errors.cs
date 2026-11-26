@@ -125,6 +125,19 @@ public class EidApiException : EidException
         Headers = headers;
     }
 
+    /// <summary>Дэд ангид (ж: <see cref="EidShareException"/>): өөрийн мессеж ба үндсэн алдаатай.</summary>
+    protected EidApiException(int status, string body, string? code, string? service, TimeSpan? retryAfter, HttpResponseHeaders? headers,
+        string message, Exception? innerException)
+        : base(message, innerException)
+    {
+        _status = status;
+        _code = code;
+        _retryAfter = retryAfter;
+        Body = body;
+        Service = service;
+        Headers = headers;
+    }
+
     /// <inheritdoc/>
     public override string? Code => _code;
 
@@ -551,6 +564,28 @@ public static class ValidationReasons
     public const string RevocationRevoked = "revocation.revoked";
     /// <summary>Цуцлалтын төлөв тогтоогдсонгүй (hard-fail).</summary>
     public const string RevocationUnknown = "revocation.unknown";
+
+    // ── .NET-ийн нэмэлт түлхүүрүүд (корпуст алга; Go/TS-д reason key-гүй ValidationError) ──
+
+    /// <summary>
+    /// .NET-ийн нэмэлт (Go/TS-ээс хатуу): гэрчилгээний subject-д SERIALNUMBER эсвэл CN нэгээс олон. Go сүүлийнхийг, TS
+    /// эхнийхийг авдаг — SDK хооронд өөр иргэн гарахаас сэргийлж татгалзана. <see cref="CertWeakKey"/>-ийн дараа шалгана.
+    /// </summary>
+    public const string SubjectDuplicateIdentity = "subject.duplicate_identity";
+    /// <summary>.NET-ийн нэмэлт: CA-ийн хариунд заавал талбар алга эсвэл хэлбэр буруу (seal, тамганы эрх, токен, share).</summary>
+    public const string ResponseMalformed = "response.malformed";
+    /// <summary>.NET-ийн нэмэлт: тамганы хариуны гэрчилгээ e-Seal профайл биш (Go <c>IsSealCertificate</c>).</summary>
+    public const string SealNotSealCertificate = "seal.not_seal_certificate";
+    /// <summary>.NET-ийн нэмэлт: тамганы гарын үсэг digest-тэй таарсангүй.</summary>
+    public const string SealSignature = "seal.signature";
+    /// <summary>.NET-ийн нэмэлт: CA-ийн CSR hash, эсвэл олгосон гэрчилгээний түлхүүр илгээсэн CSR-тэй таарсангүй.</summary>
+    public const string TokenCsrMismatch = "token.csr_mismatch";
+    /// <summary>.NET-ийн нэмэлт: токены challenge өөр RP-д холбогдсон, эсвэл rpUUID / challenge-ийн хэлбэр буруу.</summary>
+    public const string TokenChallenge = "token.challenge";
+    /// <summary>.NET-ийн нэмэлт: токены гарын үсэг (EC P-256 r||s) challenge-тэй таарсангүй.</summary>
+    public const string TokenSignature = "token.signature";
+    /// <summary>.NET-ийн нэмэлт: токены нэвтрэлтийн CA хариу endResult OK биш, эсвэл identity.etsi ≠ гэрчилгээний SERIALNUMBER.</summary>
+    public const string TokenIdentity = "token.identity";
 }
 
 /// <summary>

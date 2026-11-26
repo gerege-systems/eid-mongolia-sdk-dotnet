@@ -42,7 +42,23 @@ public class WireConformanceTests
         ["sign.certificateChoiceDeviceLink"] = (c, a) => c.Sign.CertificateChoiceDeviceLinkAsync(Arg<CertChoiceOptions?>(a, "options")),
         ["session.poll"] = (c, a) => c.Session.PollAsync(Arg<string>(a, "sessionId"), TimeSpan.FromMilliseconds(Arg<int>(a, "serverPollMs"))),
         ["pdf.registerSignature"] = (c, a) => c.Pdf.RegisterSignatureAsync(Arg<PdfSignatureRegistration>(a, "registration")),
+        ["organization.getRepresentations"] = (c, a) => c.Organization.GetRepresentationsAsync(Arg<string>(a, "personEtsi")),
+        ["organization.sealGrants"] = (c, a) => c.Organization.SealGrantsAsync(Arg<string>(a, "personEtsi")),
+        ["person.certificates"] = (c, a) => c.Person.CertificatesAsync(Arg<string>(a, "personEtsi")),
+        ["person.devices"] = (c, a) => c.Person.DevicesAsync(Arg<string>(a, "personEtsi")),
+        ["person.activity"] = (c, a) => c.Person.ActivityAsync(Arg<string>(a, "personEtsi"), Arg<ActivityQuery?>(a, "query")),
+        ["person.summary"] = (c, a) => c.Person.SummaryAsync(Arg<string>(a, "personEtsi")),
+        ["person.children"] = (c, a) => c.Person.ChildrenAsync(Arg<string>(a, "personEtsi")),
+        ["seal.certificateRequest"] = (c, a) => c.Seal.CertificateRequestAsync(Arg<string>(a, "orgEtsi"), Arg<string>(a, "requestId")),
+        ["seal.requestCertificate"] = (c, a) => c.Seal.RequestCertificateAsync(Arg<string>(a, "orgEtsi")),
+        ["seal.requestGrant"] = (c, a) => c.Seal.RequestGrantAsync(Arg<string>(a, "orgEtsi"), Arg<string>(a, "sessionId")),
+        ["seal.grantStatus"] = (c, a) => c.Seal.GrantStatusAsync(Arg<string>(a, "grantId")),
+        ["token.authChallenge"] = (c, _) => c.Token.AuthChallengeAsync(),
+        ["token.certificateResult"] = (c, a) => c.Token.CertificateResultAsync(Arg<string>(a, "sessionId")),
     };
+
+    private const string SealReq = "{\"requestId\":\"r1\",\"orgEtsi\":\"NTRMN-6235972\",\"status\":\"PENDING\",\"createdAt\":\"2026-11-09T05:00:00Z\",\"expiresAt\":\"2026-11-09T05:07:00Z\"}";
+    private const string Grant = "{\"grantId\":\"g1\",\"orgEtsi\":\"NTRMN-6235972\",\"status\":\"PENDING\",\"expiresAt\":\"2026-11-20T05:07:00Z\"}";
 
     private const string Push = "{\"sessionID\":\"s1\",\"vc\":{\"type\":\"alphaNumeric5\",\"value\":\"90177\"}}";
     private const string Ix = "[{\"type\":\"displayTextAndPIN\",\"displayText60\":\"Нэвтрэх\"}]";
@@ -116,6 +132,36 @@ public class WireConformanceTests
             "POST", "/pdf/signatures",
             "{\"docID\":\"d\",\"revIndex\":1,\"medium\":\"phone\",\"sessionID\":\"s\",\"cms\":\"MAE=\",\"fileName\":\"a.pdf\",\"inSha256\":\"in\",\"pageSha256\":\"pg\",\"sigRevSha256\":\"sr\",\"outSha256\":\"out\",\"signerEtsi\":\"PNOMN-1\"}",
             "{\"docID\":\"d\",\"revIndex\":1,\"registeredAt\":\"x\",\"verifyUrl\":\"v\"}");
+        yield return W("org-representations", "go client_test.go TestOrganization", "organization.getRepresentations",
+            "{\"personEtsi\":\"PNOMN-12345678\"}", "GET", "/organization/representations/etsi/PNOMN-12345678", null, "{\"representations\":[]}");
+        yield return W("org-seal-grants", "go seal_grant_test.go TestOrganization_SealGrants", "organization.sealGrants",
+            "{\"personEtsi\":\"PNOMN-12345678\"}", "GET", "/organization/seal-grants/etsi/PNOMN-12345678", null, "{\"organizations\":[]}");
+        yield return W("person-certificates", "go portal_gaps_test.go TestPersonService", "person.certificates",
+            "{\"personEtsi\":\"PNOMN-1\"}", "GET", "/certificates/etsi/PNOMN-1", null, "{}");
+        yield return W("person-devices", "go portal_gaps_test.go TestPersonService", "person.devices",
+            "{\"personEtsi\":\"PNOMN-1\"}", "GET", "/devices/etsi/PNOMN-1", null, "{}");
+        yield return W("person-activity-query", "go portal_gaps_test.go TestPersonService", "person.activity",
+            "{\"personEtsi\":\"PNOMN-1\",\"query\":{\"flow\":\"SIGNATURE\",\"limit\":5,\"offset\":10}}", "GET",
+            "/rp/activity/etsi/PNOMN-1?flow=SIGNATURE&limit=5&offset=10", null, "{}");
+        yield return W("person-activity-default", "go portal_gaps_test.go TestPersonService (nil query)", "person.activity",
+            "{\"personEtsi\":\"PNOMN-1\"}", "GET", "/rp/activity/etsi/PNOMN-1", null, "{}");
+        yield return W("person-summary", "go portal_gaps_test.go TestPersonService", "person.summary",
+            "{\"personEtsi\":\"PNOMN-1\"}", "GET", "/person/summary/etsi/PNOMN-1", null, "{}");
+        yield return W("person-children", "go portal_gaps_test.go TestPersonService", "person.children",
+            "{\"personEtsi\":\"PNOMN-1\"}", "GET", "/person/children/etsi/PNOMN-1", null, "{}");
+        yield return W("seal-request-certificate", "go seal_test.go TestSeal_RequestCertificate", "seal.requestCertificate",
+            "{\"orgEtsi\":\"NTRMN-6235972\"}", "POST", "/seal/certificate/NTRMN-6235972", "{}", SealReq);
+        yield return W("seal-certificate-request", "go seal_test.go TestSeal_CertificateRequestIssued", "seal.certificateRequest",
+            "{\"orgEtsi\":\"NTRMN-6235972\",\"requestId\":\"r1\"}", "GET", "/seal/certificate/NTRMN-6235972/requests/r1", null, SealReq);
+        yield return W("seal-request-grant", "go seal_grant_test.go TestSealGrant_Request", "seal.requestGrant",
+            "{\"orgEtsi\":\" NTRMN-6235972 \",\"sessionId\":\"sess-1\"}", "POST", "/seal/grants", "{\"orgEtsi\":\"NTRMN-6235972\",\"sessionId\":\"sess-1\"}", Grant);
+        yield return W("seal-grant-status", "go seal_grant_test.go TestSealGrant_StatusApproved", "seal.grantStatus",
+            "{\"grantId\":\"g1\"}", "GET", "/seal/grants/g1", null, Grant);
+        yield return W("token-auth-challenge", "go portal_gaps_test.go TestTokenAuth", "token.authChallenge",
+            "{}", "POST", "/token/auth/challenge", "{\"relyingPartyUUID\":\"rp-uuid\",\"relyingPartyName\":\"Гэрээний систем\"}",
+            "{\"challengeId\":\"c1\",\"challenge\":\"q3J0\",\"rpUUID\":\"rp-uuid\"}");
+        yield return W("token-certificate-result", "go portal_gaps_test.go TestTokenCertificate", "token.certificateResult",
+            "{\"sessionId\":\"ts1\"}", "GET", "/token/certificate/ts1", null, "{\"status\":\"PENDING\"}");
     }
 
     public static IEnumerable<object[]> PortedNames() => PortedCases().Select(c => new object[] { c.Name });

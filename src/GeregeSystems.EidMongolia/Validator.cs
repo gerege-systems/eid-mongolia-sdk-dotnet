@@ -726,6 +726,7 @@ public sealed class ResponseValidator
             throw Invalid(ValidationReasons.CertWeakKey,
                 "гэрчилгээний RSA түлхүүр сул (" + leaf.RsaBits + " бит < " + ParsedCert.MinRsaBits + " эсвэл буруу exponent; serial " + leaf.SerialHex() + ")");
         }
+        CheckSubjectIdentity(leaf);
         var now = _clock.GetUtcNow();
         CheckValidity(leaf, now);
         VerifyCertificate(leaf, protocol, now);
@@ -733,6 +734,36 @@ public sealed class ResponseValidator
         var level = EffectiveLevel(result.CertificateLevel ?? "", fromCert);
         CheckLevel(level);
         return (leaf, level);
+    }
+
+    /// <summary>
+    /// .NET-ийн нэмэлт (Go/TS-ээс хатуу): subject-д SERIALNUMBER эсвэл CN нэгээс олон бол татгалзана — Go сүүлийнхийг, TS
+    /// эхнийхийг авдаг тул SDK хооронд өөр иргэн гарахаас сэргийлнэ.
+    /// </summary>
+    internal static void CheckSubjectIdentity(ParsedCert c)
+    {
+        if (c.DuplicateSubjectIdentity)
+        {
+            throw Invalid(ValidationReasons.SubjectDuplicateIdentity,
+                "гэрчилгээний subject-д SERIALNUMBER эсвэл CN давхардсан (serial " + c.SerialHex() + ")");
+        }
+    }
+
+    /// <summary>
+    /// Токены нэвтрэлтийн гэрчилгээ (<see cref="TokenService.AuthVerifyAsync"/>; Go validator.go
+    /// <c>verifyTokenAuthCertificate</c>): хугацаа, зориулалт (auth), гинж, issuer. Түвшинг шалгахгүй (2026-11-06-аас өмнө
+    /// олгосон токен CA-д ADVANCED). Сул түлхүүр ба давхардсан SERIALNUMBER/CN-ийг <see cref="LeafOf"/>-той ижил татгалзана.
+    /// </summary>
+    internal void VerifyTokenAuthCertificate(ParsedCert leaf)
+    {
+        if (leaf.WeakKey)
+        {
+            throw Invalid(ValidationReasons.CertWeakKey, "гэрчилгээний RSA түлхүүр сул (serial " + leaf.SerialHex() + ")");
+        }
+        CheckSubjectIdentity(leaf);
+        var now = _clock.GetUtcNow();
+        CheckValidity(leaf, now);
+        VerifyCertificate(leaf, SignatureProtocols.AcspV2, now);
     }
 
     /// <summary>Алдааны текстэд subject (иргэний нэр/PNOMN) биш serial (hex) орно.</summary>
@@ -857,7 +888,7 @@ public sealed class ResponseValidator
     }
 
     /// <summary>Go <c>CertificateLevelOf</c>.</summary>
-    private static string LevelOf(ParsedCert c, string protocol)
+    internal static string LevelOf(ParsedCert c, string protocol)
     {
         if (c.Extension(ParsedCert.OidQcStatements) is { } qc)
         {
@@ -1041,13 +1072,41 @@ public sealed class ResponseValidator
     /// </summary>
     internal void VerifyChain(ParsedCert leaf, string usage, DateTimeOffset at)
     {
+        var r = FindPath(leaf, _anchors, _intermediates, usage, at, null);
+        if (r.Path is not null)
+        {
+            return;
+        }
+        if (r.Fail is { } f)
+        {
+            throw Invalid(f.Key, "гэрчилгээний гинж хүчингүй: " + f.Text);
+        }
+        throw Invalid(ValidationReasons.ChainUntrusted, "гэрчилгээний итгэлцлийн гинж trust anchor (Root CA) хүрсэнгүй");
+    }
+
+    /// <summary><see cref="FindPath"/>-ийн үр дүн.</summary>
+    /// <param name="Path">Хүчинтэй (ба <c>accept</c>-ийн зөвшөөрсөн) зам: [0] = шууд issuer … сүүлийнх = anchor; алга бол null.</param>
+    /// <param name="Fail">Зам алга үед: leaf-ийн эсвэл эхэлж тааралдсан CA-ийн шалтгаан; null = итгэлцлийн зам огт алга.</param>
+    /// <param name="Rejected">Хүчинтэй зам олдсон ч <c>accept</c> бүгдийг татгалзсан.</param>
+    internal readonly record struct PathResult(List<ParsedCert>? Path, Fail? Fail, bool Rejected);
+
+    /// <summary>
+    /// <see cref="VerifyChain"/>-ийн замын угсралт (TS validator.ts <c>verifyChain</c>), өгсөн anchors / intermediates дээр.
+    /// <paramref name="usage"/> null бол EKU шалгахгүй (My QR: Go <c>ExtKeyUsageAny</c>). <paramref name="accept"/> — хүчинтэй
+    /// замыг нэмж шүүх (My QR-ийн issuer SKI allowlist, Go <c>qrChain</c>); null = эхний хүчинтэй зам.
+    /// </summary>
+    internal static PathResult FindPath(ParsedCert leaf, IReadOnlyList<ParsedCert> anchors, IReadOnlyList<ParsedCert> intermediates,
+        string? usage, DateTimeOffset at, Func<List<ParsedCert>, bool>? accept)
+    {
         var now = at < leaf.NotBefore ? leaf.NotBefore : at > leaf.NotAfter ? leaf.NotAfter : at;
         if ((CriticalFail(leaf) ?? EkuFail(leaf, usage)) is { } lf)
         {
-            throw Invalid(lf.Key, "гэрчилгээний гинж хүчингүй: " + lf.Text);
+            return new PathResult(null, lf, false);
         }
         Fail? first = null;
-        var candidates = _anchors.Select(c => (Cert: c, Anchor: true)).Concat(_intermediates.Select(c => (Cert: c, Anchor: false))).ToList();
+        var rejected = false;
+        List<ParsedCert>? found = null;
+        var candidates = anchors.Select(c => (Cert: c, Anchor: true)).Concat(intermediates.Select(c => (Cert: c, Anchor: false))).ToList();
 
         bool Extend(ParsedCert cur, List<ParsedCert> cas)
         {
@@ -1066,7 +1125,18 @@ public sealed class ResponseValidator
                     first ??= bad;
                     continue;
                 }
-                if (isAnchor || Extend(cand, new List<ParsedCert>(cas) { cand }))
+                var next = new List<ParsedCert>(cas) { cand };
+                if (isAnchor)
+                {
+                    if (accept is null || accept(next))
+                    {
+                        found = next;
+                        return true;
+                    }
+                    rejected = true;
+                    continue;
+                }
+                if (Extend(cand, next))
                 {
                     return true;
                 }
@@ -1074,15 +1144,7 @@ public sealed class ResponseValidator
             return false;
         }
 
-        if (Extend(leaf, new List<ParsedCert>()))
-        {
-            return;
-        }
-        if (first is { } f)
-        {
-            throw Invalid(f.Key, "гэрчилгээний гинж хүчингүй: " + f.Text);
-        }
-        throw Invalid(ValidationReasons.ChainUntrusted, "гэрчилгээний итгэлцлийн гинж trust anchor (Root CA) хүрсэнгүй");
+        return Extend(leaf, new List<ParsedCert>()) ? new PathResult(found, null, false) : new PathResult(null, first, rejected);
     }
 
     /// <summary>child-ийг cand гаргасан эсэх: issuer нэр = subject (байт), AKI/SKI (хоёулаа байвал) таарах, гарын үсэг.</summary>
@@ -1100,7 +1162,7 @@ public sealed class ResponseValidator
     }
 
     /// <summary>Issuer CA-ийн шалгалт (TS <c>caReason</c>-ийн дараалал); below = энэ CA-аас доорх завсрын CA-ийн тоо.</summary>
-    internal static Fail? CaFail(ParsedCert ca, int below, DateTimeOffset now, string usage)
+    internal static Fail? CaFail(ParsedCert ca, int below, DateTimeOffset now, string? usage)
     {
         if (!ca.IsCa)
         {
@@ -1137,9 +1199,12 @@ public sealed class ResponseValidator
         return null;
     }
 
-    /// <summary>EKU тавьсан бол <paramref name="usage"/> эсвэл anyExtendedKeyUsage агуулах ёстой (EKU-гүй = дурын).</summary>
-    private static Fail? EkuFail(ParsedCert c, string usage) =>
-        c.Eku.Count > 0 && !c.Eku.Contains(usage) && !c.Eku.Contains(EkuAny)
+    /// <summary>
+    /// EKU тавьсан бол <paramref name="usage"/> эсвэл anyExtendedKeyUsage агуулах ёстой (EKU-гүй = дурын); usage null бол
+    /// шалгахгүй.
+    /// </summary>
+    private static Fail? EkuFail(ParsedCert c, string? usage) =>
+        usage is not null && c.Eku.Count > 0 && !c.Eku.Contains(usage) && !c.Eku.Contains(EkuAny)
             ? new Fail(ValidationReasons.ChainEku, "гэрчилгээний ExtKeyUsage энэ үйлдэлд тохирохгүй (гинжийн EKU)")
             : null;
 }

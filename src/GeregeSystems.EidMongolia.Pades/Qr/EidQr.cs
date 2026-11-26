@@ -303,11 +303,27 @@ public static class EidQr
         return false;
     }
 
-    /// <summary>Анхдагч цуцлалт: навчны AIA-ийн OCSP (CertID, гарын үсэг, responder, шинэлэг байдал). Хариугүй бол "unknown".</summary>
-    internal static async Task<string> DefaultRevocationAsync(X509Certificate2 leaf, X509Certificate2? issuer, CancellationToken ct)
+    /// <summary>
+    /// «Миний QR»-ийн OCSP хариуны хамгийн хуучин thisUpdate (Go ocsp.go <c>ocspMaxAge</c>, TS ocsp.ts) — PAdES LTV-ийн 24 ц-ийн
+    /// дүрэм (<see cref="Revocation.FreshAt"/>)-ээс тусдаа.
+    /// </summary>
+    internal static readonly TimeSpan QrOcspMaxAge = TimeSpan.FromHours(48);
+
+    /// <summary>
+    /// Go ocsp.go <c>verify</c>-ийн шинэлэг байдал: thisUpdate ∈ [now − 48 ц, now + 5 мин], nextUpdate (байвал) өнгөрөөгүй.
+    /// </summary>
+    internal static bool QrOcspFresh(DateTimeOffset thisUpdate, DateTimeOffset? nextUpdate, DateTimeOffset now) =>
+        thisUpdate <= now + Revocation.ClockSkew && thisUpdate >= now - QrOcspMaxAge && !(nextUpdate is { } nu && nu < now);
+
+    /// <summary>
+    /// Анхдагч цуцлалт: навчны AIA-ийн OCSP (CertID, гарын үсэг, responder, шинэлэг байдал — Go/TS дүрэм: thisUpdate ≤ 48 ц,
+    /// дараа нь OCSP revoked ба unknown (олгогч энэ serial-ийг олгоогүй) → "revoked"). Хариугүй бол "unknown".
+    /// </summary>
+    internal static async Task<string> DefaultRevocationAsync(X509Certificate2 leaf, X509Certificate2? issuer, CancellationToken ct,
+        HttpClient? http = null, DateTimeOffset? now = null)
     {
         if (issuer is null) return "unknown";
-        using var f = new Fetcher(null);
+        using var f = new Fetcher(http);
         foreach (var url in X509Util.OcspServers(leaf))
         {
             try
@@ -315,9 +331,9 @@ public static class EidQr
                 var der = await f.DoAsync(HttpMethod.Post, url, "application/ocsp-request", Ocsp.CreateRequest(leaf, issuer), ct).ConfigureAwait(false);
                 var resp = Ocsp.ParseForCert(der, leaf, issuer);
                 if (!Ocsp.ResponderOk(resp, issuer) || !Revocation.OcspCertIdMatches(der, leaf, issuer)) continue;
-                if (resp.Status == OcspStatus.Revoked) return "revoked";
-                var now = DateTimeOffset.UtcNow;
-                if (resp.Status == OcspStatus.Good && Revocation.FreshAt(resp.ThisUpdate, resp.NextUpdate, now, now)) return "good";
+                var t = now ?? DateTimeOffset.UtcNow;
+                if (!QrOcspFresh(resp.ThisUpdate, resp.NextUpdate, t)) continue;
+                return resp.Status == OcspStatus.Good ? "good" : "revoked";
             }
             catch (Exception e) when (e is HttpRequestException or System.IO.IOException or FormatException or AsnContentException
                                           or CryptographicException or OperationCanceledException && !ct.IsCancellationRequested)
