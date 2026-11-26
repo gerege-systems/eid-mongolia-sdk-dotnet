@@ -51,8 +51,10 @@ public static class EidLoginEndpointRouteBuilderExtensions
     /// нормчилдог) доор <see cref="EidLoginHandler"/>-ийг холбоно. <paramref name="onSuccess"/> — иргэн баталгаажсан: таны
     /// session-ийг ШИНЭ id-тай үүсгэж <c>http.Response.Cookies</c>-оор тавь. Client / Store / Log нь
     /// <paramref name="configure"/>-д өгөөгүй бол DI-аас (<see cref="EidMongoliaServiceCollectionExtensions.AddEidMongolia(IServiceCollection, EidClientOptions)"/>,
-    /// ILoggerFactory). ClientIp-ийг илэрхий өг (<see cref="EidLoginClientIp.RemoteAddress"/> — ForwardedHeaders middleware-ийн
-    /// дараа, эсвэл <see cref="EidLoginClientIp.Forwarded"/>).
+    /// ILoggerFactory). ClientIp өгөөгүй бол <see cref="EidLoginClientIp.RemoteAddress"/> (<c>HttpContext.Connection.RemoteIpAddress</c>).
+    /// Reverse proxy-ийн ард бол <c>app.UseForwardedHeaders()</c>-ийг (KnownProxies / KnownNetworks-тэй) <c>MapEidLogin</c>-оос
+    /// ӨМНӨ ажиллуул, эсвэл <c>o.ClientIp = EidLoginClientIp.Forwarded(n)</c> (n = итгэмжит proxy-ийн тоо) — эс бөгөөс бүх
+    /// хэрэглэгч proxy-ийн нэг IP-ийн <c>start</c> хязгаарыг хуваалцана. IP-ээр хязгаарлахгүй бол <c>o.ClientIp = _ =&gt; null</c>.
     /// </summary>
     public static IEndpointConventionBuilder MapEidLogin(this IEndpointRouteBuilder endpoints, string prefix,
         Func<HttpContext, EidLoginIdentity, Task<EidLoginSuccess?>> onSuccess, Action<EidLoginOptions>? configure = null)
@@ -65,6 +67,7 @@ public static class EidLoginEndpointRouteBuilderExtensions
         o.Client ??= sp.GetRequiredService<EidClient>();
         o.Store ??= sp.GetService<IEidLoginStore>();
         o.TimeProvider ??= sp.GetService<TimeProvider>();
+        o.ClientIp ??= EidLoginClientIp.RemoteAddress;
         if (o.Log is null && sp.GetService<ILoggerFactory>() is { } lf)
         {
             var logger = lf.CreateLogger("GeregeSystems.EidMongolia.Login");

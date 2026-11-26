@@ -12,9 +12,18 @@ namespace GeregeSystems.EidMongolia;
 /// </summary>
 internal readonly record struct RpRoute(string Method, string Path)
 {
-    /// <summary>Template-ийн <c>{param}</c>-уудыг дарааллаар нь escape хийсэн <paramref name="args"/>-аар орлуулна.</summary>
+    /// <summary>
+    /// Template-ийн <c>{param}</c>-уудыг дарааллаар нь escape хийсэн <paramref name="args"/>-аар орлуулна. Хоосон, <c>.</c>,
+    /// <c>..</c> утгыг татгалзана: <c>Uri.EscapeDataString</c> цэгийг escape хийдэггүй тул System.Uri dot-segment-ийг
+    /// арилгаж хүсэлтийг өөр зам руу (ж: <c>/session/..</c> → <c>/</c>) шилжүүлнэ.
+    /// </summary>
+    /// <exception cref="ArgumentException">Параметр хоосон, <c>.</c> эсвэл <c>..</c>.</exception>
     public string Expand(params string[] args)
     {
+        foreach (var a in args)
+        {
+            CheckSegment(a);
+        }
         var b = new StringBuilder();
         var rest = Path;
         foreach (var a in args)
@@ -35,6 +44,17 @@ internal readonly record struct RpRoute(string Method, string Path)
         }
         b.Append(rest);
         return b.ToString();
+    }
+
+    /// <summary>Замын нэг сегментэд орох утга: null биш, хоосон биш, <c>.</c> / <c>..</c> биш.</summary>
+    /// <exception cref="ArgumentException">Хоосон, <c>.</c> эсвэл <c>..</c>.</exception>
+    internal static void CheckSegment(string? value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value is "" or "." or "..")
+        {
+            throw new ArgumentException("eid: замын параметр хоосон, \".\" эсвэл \"..\" байж болохгүй", nameof(value));
+        }
     }
 }
 

@@ -111,10 +111,18 @@ public static class EidQr
         try
         {
             leaf = leafP.ToX509();
+        }
+        catch (CryptographicException)
+        {
+            throw Err(EidQrErrorCodes.HeaderInvalid, "x5c гэрчилгээ биш");
+        }
+        try
+        {
             issuer = issuerP.ToX509();
         }
         catch (CryptographicException)
         {
+            leaf.Dispose();
             throw Err(EidQrErrorCodes.HeaderInvalid, "x5c гэрчилгээ биш");
         }
 
@@ -165,6 +173,11 @@ public static class EidQr
             var pb = B64UrlOrNull(seg[1]) ?? throw Err(EidQrErrorCodes.JwsMalformed, "payload base64url биш");
             using var doc = ParseObjectOrNull(pb) ?? throw Err(EidQrErrorCodes.JwsMalformed, "payload JSON объект биш");
             var c = doc.RootElement;
+            if (NamesOrNull(c) is null)
+            {
+                // Go jsonObject: давхардсан / уншигдахгүй түлхүүр → QR_JWS_MALFORMED.
+                throw Err(EidQrErrorCodes.JwsMalformed, "payload-ийн түлхүүр буруу эсвэл давхардсан");
+            }
             var subject = leafP.Subject;
             var etsi = subject.SerialNumber;
             var (iat, data, source, photo) = CheckClaims(c, expect, etsi, now);
@@ -179,6 +192,11 @@ public static class EidQr
             leaf.Dispose();
             throw;
         }
+        finally
+        {
+            // Олгогчийг зөвхөн цуцлалтын шалгалтад хэрэглэнэ (QrSigner-т орохгүй).
+            issuer.Dispose();
+        }
     }
 
     internal static EidQrException Err(string code, string reason) => new(code, reason);
@@ -191,16 +209,16 @@ public static class EidQr
         var hb = B64UrlOrNull(seg0) ?? throw Bad("header base64url биш");
         using var hdr = ParseObjectOrNull(hb) ?? throw Bad("header JSON объект биш");
         var h = hdr.RootElement;
-        var names = h.EnumerateObject().Select(p => p.Name).ToList();
+        var names = NamesOrNull(h) ?? throw Bad("header-ийн түлхүүр буруу эсвэл давхардсан");
         if (names.Count != 3 || !names.OrderBy(n => n, StringComparer.Ordinal).SequenceEqual(new[] { "alg", "typ", "x5c" }))
         {
             throw Bad("header-ийн гишүүд яг alg, typ, x5c биш");
         }
-        if (h.GetProperty("alg") is not { ValueKind: JsonValueKind.String } alg || alg.GetString() != "PS256")
+        if (StrOrNull(h.GetProperty("alg")) != "PS256")
         {
             throw Bad("alg PS256 биш");
         }
-        if (h.GetProperty("typ") is not { ValueKind: JsonValueKind.String } typ || typ.GetString() != JwsType)
+        if (StrOrNull(h.GetProperty("typ")) != JwsType)
         {
             throw Bad("typ " + JwsType + " биш");
         }
@@ -213,7 +231,7 @@ public static class EidQr
         for (int i = 0; i < 2; i++)
         {
             var e = x5c[i];
-            if (e.ValueKind != JsonValueKind.String || e.GetString() is not { Length: > 0 } s)
+            if (StrOrNull(e) is not { Length: > 0 } s)
             {
                 throw Bad("x5c элемент хоосон эсвэл тэмдэгт мөр биш");
             }
@@ -406,20 +424,21 @@ public static class EidQr
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var m in d.EnumerateObject())
         {
-            if (!seen.Add(m.Name))
+            var name = NameOrNull(m) ?? throw Bad("data-ийн түлхүүр буруу (UTF-16)");
+            if (!seen.Add(name))
             {
                 throw Bad("data-д давхардсан гишүүн");
             }
-            switch (m.Name)
+            switch (name)
             {
                 case "source":
-                    source = m.Value.ValueKind == JsonValueKind.String ? m.Value.GetString() : throw Bad("source тэмдэгт мөр биш");
+                    source = StrOrNull(m.Value) ?? throw Bad("source тэмдэгт мөр биш");
                     break;
                 case "fields":
                     fields = m.Value;
                     break;
                 case "photo":
-                    photoB64 = m.Value.ValueKind == JsonValueKind.String ? m.Value.GetString() : throw Bad("photo тэмдэгт мөр биш");
+                    photoB64 = StrOrNull(m.Value) ?? throw Bad("photo тэмдэгт мөр биш");
                     break;
                 default:
                     throw Bad("data-д илүү гишүүн");
@@ -512,7 +531,55 @@ public static class EidQr
     }
 
     private static string? Str(JsonElement o, string name) =>
-        o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        o.TryGetProperty(name, out var v) ? StrOrNull(v) : null;
+
+    /// <summary>
+    /// JSON мөрийн утга; мөр биш эсвэл UTF-16 болгож чадахгүй (ганц surrogate <c>"\udc00"</c> — <c>GetString</c>-ийн
+    /// InvalidOperationException) бол null — дуудагч нь өөрийн <see cref="EidQrException"/> кодоор татгалзана.
+    /// </summary>
+    internal static string? StrOrNull(JsonElement e)
+    {
+        if (e.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        try
+        {
+            return e.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string? NameOrNull(JsonProperty p)
+    {
+        try
+        {
+            return p.Name;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Объектын түлхүүрүүд дарааллаар; уншигдахгүй эсвэл давхардсан түлхүүр байвал null (Go <c>jsonObject</c>).</summary>
+    internal static List<string>? NamesOrNull(JsonElement o)
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in o.EnumerateObject())
+        {
+            if (NameOrNull(p) is not { } n || !seen.Add(n))
+            {
+                return null;
+            }
+            names.Add(n);
+        }
+        return names;
+    }
 
     private static bool Int(JsonElement o, string name, out long n)
     {
@@ -627,7 +694,8 @@ public sealed record QrExpect(string RpUuid, string SessionId, string Nonce, str
 /// <param name="AllowedIssuerSkis">Навчийг шууд гаргасан CA-ийн SKI (hex, ":" зөвшөөрнө; null/хоосон = <see cref="EidQr.CitizenIssuingCaSki"/>).</param>
 /// <param name="Revocation">
 /// (навч, олгогч) → "good" | "revoked" | "unknown"; null = AIA-ийн OCSP (<see cref="OcspRevocationChecker"/>: OCSP unknown →
-/// "revoked", 48 ц). Exception = "unknown".
+/// "revoked", 48 ц). Exception = "unknown". Олгогчийн гэрчилгээг <see cref="EidQr.VerifyAsync"/> дуусахад Dispose хийнэ —
+/// хадгалах бол хуулбарла.
 /// </param>
 /// <param name="RevocationSoftFail">true бол "unknown"-г хүлээн авна (анхдагч hard-fail).</param>
 public sealed record QrTrust(IReadOnlyList<X509Certificate2>? Anchors = null, IReadOnlyList<X509Certificate2>? Intermediates = null,

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -228,7 +230,7 @@ public sealed class EidLoginHandler
             return Error(429, EidLoginErrors.RateLimited, ("Retry-After", "60"));
         }
 
-        if (_clientIp?.Invoke(request) is { Length: > 0 } ip && !await AllowAsync("start", ip, ct).ConfigureAwait(false))
+        if (_clientIp?.Invoke(request) is { Length: > 0 } ip && !await AllowAsync("start", RateKeyIp(ip), ct).ConfigureAwait(false))
         {
             return await Limited().ConfigureAwait(false);
         }
@@ -1149,10 +1151,31 @@ public sealed class EidLoginHandler
             }
             return (mode, id, lang);
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or InvalidOperationException or ArgumentException)
         {
+            // InvalidOperationException: GetString / нэрийн харьцуулалт ганц surrogate-тэй ("\udc00") мөрийг UTF-16 болгож
+            // чадаагүй — 500 + stack trace биш, бусад буруу биетэй адил 400 invalid_body.
             return null;
         }
+    }
+
+    /// <summary>
+    /// <c>start:&lt;ip&gt;</c> хязгаарын түлхүүрийн IP: IPv6 бол /64 угтвар (<c>2001:db8:1:2::/64</c> — нэг клиент /64-ийн
+    /// дотор хаягаа сольж хязгаарыг тойрохгүй), IPv4-mapped IPv6 бол IPv4; IPv4 ба задрахгүй утга хэвээр.
+    /// </summary>
+    internal static string RateKeyIp(string ip)
+    {
+        if (ip.IndexOf(':') < 0 || !IPAddress.TryParse(ip, out var a) || a.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return ip;
+        }
+        if (a.IsIPv4MappedToIPv6)
+        {
+            return a.MapToIPv4().ToString();
+        }
+        var b = a.GetAddressBytes();
+        Array.Clear(b, 8, 8);
+        return new IPAddress(b).ToString() + "/64";
     }
 
     /// <summary>idCode: бүх хоосон зайг хасаж том үсгээр (Go <c>strings.ToUpper(strings.Join(strings.Fields(..), ""))</c>).</summary>

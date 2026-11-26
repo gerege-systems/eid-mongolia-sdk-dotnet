@@ -313,6 +313,17 @@ public class QrTests
         yield return new("photo_unpadded", () => Jws(Data(d => d["photo"] = Convert.ToBase64String(Jpeg(10)).TrimEnd('='))), EidQrErrorCodes.DataInvalid);
         yield return new("data_extra_member", () => Jws(Data(d => d["extra"] = "x")), EidQrErrorCodes.DataInvalid);
         yield return new("data_missing", () => Jws(Pl(o => o.Remove("data"))), EidQrErrorCodes.DataInvalid);
+        // Ганц surrogate ("\udc00") ба давхардсан түлхүүр — InvalidOperationException биш, EidQrException.
+        string PlRaw(Func<string, string> edit) => Sign(Header(p.Leaf, p.Ca), edit(PayloadJson(Payload(iat))), p.LeafKey);
+        yield return new("header_lone_surrogate_typ", () => Hdr("{\"alg\":\"PS256\",\"typ\":\"\\udc00\",\"x5c\":[\"" + leafB64 + "\",\"" + caB64 + "\"]}"), EidQrErrorCodes.HeaderInvalid);
+        yield return new("header_lone_surrogate_key", () => Hdr("{\"\\udc00\":\"PS256\",\"typ\":\"eidmn-myqr+jwt\",\"x5c\":[\"" + leafB64 + "\",\"" + caB64 + "\"]}"), EidQrErrorCodes.HeaderInvalid);
+        yield return new("header_lone_surrogate_x5c", () => Hdr("{\"alg\":\"PS256\",\"typ\":\"eidmn-myqr+jwt\",\"x5c\":[\"\\ud800\",\"" + caB64 + "\"]}"), EidQrErrorCodes.HeaderInvalid);
+        yield return new("payload_duplicate_iss", () => PlRaw(j => "{\"iss\":\"https://evil.example\"," + j[1..]), EidQrErrorCodes.JwsMalformed);
+        yield return new("payload_lone_surrogate_key", () => PlRaw(j => "{\"\\udc00\":1," + j[1..]), EidQrErrorCodes.JwsMalformed);
+        yield return new("payload_lone_surrogate_iss", () => PlRaw(j => j.Replace("\"iss\":\"" + EidQr.DefaultIssuer + "\"", "\"iss\":\"\\udc00\"", StringComparison.Ordinal)), EidQrErrorCodes.ClaimsInvalid);
+        yield return new("data_lone_surrogate_source", () => PlRaw(j => j.Replace("\"citizenid\"", "\"\\udc00\"", StringComparison.Ordinal)), EidQrErrorCodes.DataInvalid);
+        yield return new("data_lone_surrogate_member", () => PlRaw(j => j.Replace("\"source\":", "\"\\udc00\":1,\"source\":", StringComparison.Ordinal)), EidQrErrorCodes.DataInvalid);
+        yield return new("data_lone_surrogate_field_key", () => PlRaw(j => j.Replace("\"reg_no\"", "\"\\udc00\"", StringComparison.Ordinal)), EidQrErrorCodes.DataInvalid);
     }
 
     private static byte[] Jpeg(int n)
@@ -580,6 +591,18 @@ public class QrTests
             var e = await Assert.ThrowsAsync<EidQrException>(() => c.StartAsync(new QrStartRequest(bad)));
             Assert.Equal(EidQrErrorCodes.FormatInvalid, e.Code);
             Assert.Null(e.HttpStatus);
+        }
+        Assert.Equal(0, api.Hits);
+    }
+
+    [Fact]
+    public async Task DotSegmentSessionIdIsLocal()
+    {
+        var (api, c) = Client();
+        foreach (var bad in new[] { "", ".", ".." })
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => c.CheckAsync(new QrSession(bad, Nonce)));
+            await Assert.ThrowsAsync<ArgumentException>(() => c.ResultAsync(new QrSession(bad, Nonce)));
         }
         Assert.Equal(0, api.Hits);
     }

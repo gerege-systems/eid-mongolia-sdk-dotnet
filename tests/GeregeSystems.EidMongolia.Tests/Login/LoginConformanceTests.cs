@@ -109,11 +109,21 @@ public class LoginConformanceTests
         var h = new EidLoginHandler(o);
         var cookieName = Cs("cookieName");
 
+        // Танихгүй түлхүүр = harness-ийн хоцрогдол: шинэ corpus түлхүүр хоосон (vacuous) PASS болохоос сэргийлж FAIL.
+        AssertKnownKeys(name, "scenario", sc, "name", "comment", "config", "upstream", "steps", "events", "rateLimitKeys");
         var steps = sc.GetProperty("steps").EnumerateArray().ToList();
         var results = new StepResult[steps.Count];
         for (var i = 0; i < steps.Count; i++)
         {
             var st = steps[i];
+            AssertKnownKeys(name, "алхам " + i, st, "comment", "request", "expect", "upstream", "repeat");
+            AssertKnownKeys(name, "алхам " + i + " request", st.GetProperty("request"), "method", "path", "headers", "json", "text", "cookieFrom", "ip");
+            var ex = st.GetProperty("expect");
+            AssertKnownKeys(name, "алхам " + i + " expect", ex, "status", "json", "jsonKeys", "sameKeysAs", "location", "headers", "setCookie", "noSetCookie");
+            if (ex.TryGetProperty("setCookie", out var exc))
+            {
+                AssertKnownKeys(name, "алхам " + i + " expect.setCookie", exc, "value", "attributes", "cleared");
+            }
             if (st.TryGetProperty("upstream", out var stu))
             {
                 upstream.Prepend(stu);
@@ -140,9 +150,13 @@ public class LoginConformanceTests
                         headers[p.Name] = p.Value.GetString()!;
                     }
                 }
-                if (rq.TryGetProperty("cookieFrom", out var cf) && results[cf.GetInt32()].Cookie is { } ck && ck.TryGetValue("", out var cv))
+                if (rq.TryGetProperty("cookieFrom", out var cf))
                 {
-                    headers["Cookie"] = cookieName + "=" + cv;
+                    // Эх алхам cookie тавиагүй бол cookie-гүй хүсэлт илгээж хоосон PASS хийхгүй — FAIL.
+                    var from = cf.GetInt32();
+                    Assert.True(from >= 0 && from < i && results[from]?.Cookie is { } ck && ck.TryGetValue("", out _),
+                        name + ": алхам " + i + ": cookieFrom " + from + " — тэр алхам " + cookieName + " cookie тавиагүй");
+                    headers["Cookie"] = cookieName + "=" + results[from].Cookie![""];
                 }
                 var res = await h.HandleAsync(new EidLoginRequest
                 {
@@ -200,6 +214,14 @@ public class LoginConformanceTests
     }
 
     // ---- harness ----
+
+    private static void AssertKnownKeys(string scenario, string where, JsonElement o, params string[] known)
+    {
+        Assert.True(o.ValueKind == JsonValueKind.Object, scenario + ": " + where + " объект биш");
+        var unknown = o.EnumerateObject().Select(p => p.Name).Where(k => Array.IndexOf(known, k) < 0).ToList();
+        Assert.True(unknown.Count == 0, scenario + ": " + where + ": harness танихгүй түлхүүр [" + string.Join(",", unknown) +
+            "] — harness-ийг corpus README-тэй тааруул");
+    }
 
     private sealed class StepResult
     {

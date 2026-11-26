@@ -79,7 +79,9 @@ public sealed class EidLoginOptions
     /// <summary>
     /// <c>start:&lt;ip&gt;</c> хязгаарын клиент IP: шууд холбогддог бол <see cref="EidLoginClientIp.RemoteAddress"/>,
     /// итгэмжит reverse proxy-ийн ард <see cref="EidLoginClientIp.Forwarded"/>(n), эсвэл өөрийн функц. null бол IP-ээр
-    /// хязгаарлахгүй (handler үүсэхэд нэг удаа Warning) — Go/TS-тэй ижил дүрэм; таамаглаж header-т итгэхгүй.
+    /// хязгаарлахгүй (handler үүсэхэд нэг удаа Warning) — Go/TS-тэй ижил дүрэм; таамаглаж header-т итгэхгүй. Буцаасан IPv6
+    /// хаягийн түлхүүр нь /64 угтвар (<c>start:2001:db8:1:2::/64</c>); IPv4 хэвээр. ASP.NET Core-ийн <c>MapEidLogin</c>-д
+    /// анхдагч нь <see cref="EidLoginClientIp.RemoteAddress"/>.
     /// </summary>
     public Func<EidLoginRequest, string?>? ClientIp { get; set; }
 
