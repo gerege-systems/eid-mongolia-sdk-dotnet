@@ -2,6 +2,164 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.18.0 — 2026-11-26
+
+**Гол өөрчлөлт:** **аюулгүй байдлын засвартай** release — `Prepare` / `Seal`-д өгсөн халдагчийн PDF процессыг унагах
+боломжтой байсныг хаав (доорх «Security»). Шинэ: `EidPades.ValidatePdfAsync` (PDF-ийн бүрэн шалгагч, корпус v14, 80/80 Go-тэй
+deep-equal), тамганы бүртгэл (`client.Seal.RegisterSealedPdfAsync`, `SealForDocumentAsync`), QR-тэй тамганы дардас (PAdES
+golden v13), cross-SDK корпус `rp-conformance/2`-ийн хатууруулалт (login cookie `__Host-eid_login`, push-ийн rate-limit
+түлхүүр hash, validator/OCSP-ийн дүрэм). Гурван багц (core, AspNetCore, Pades) lockstep 0.18.0.
+
+*English:* a **security release**. 0.17.0 and earlier `Prepare` / `Seal` can be crashed by a crafted PDF (see Security).
+New: `EidPades.ValidatePdfAsync` (full PDF validator, corpus v14, 80/80 deep-equal to Go), seal registration
+(`client.Seal.RegisterSealedPdfAsync`, `SealForDocumentAsync`), the seal stamp with QR (PAdES golden v13), and the
+`rp-conformance/2` hardening (login cookie `__Host-eid_login`, hashed push rate-limit keys, validator/OCSP rules). All three
+packages ship in lockstep as 0.18.0.
+
+### Security
+
+**0.17.0 ба түүнээс өмнөх `GeregeSystems.EidMongolia.Pades`-ийн `EidPades.Prepare` / `Seal`-ийг тусгайлан бэлтгэсэн PDF-ээр
+унагаж болно. Итгэлгүй эх сурвалжийн (хэрэглэгчийн upload гэх мэт) PDF дамжуулдаг бүх хэрэглэгч 0.18.0 руу шинэчлэхийг
+зөвлөж байна.**
+
+- **StackOverflow (catch хийх боломжгүй, host процесс унана):** ~1 KB PDF бүтцийн урьдчилсан шалгалтыг тойрч (тайлбар/мөр дэх
+  `/Encrypt` бичвэр ObjStm-ийн шалгалтыг унтраадаг байсан; 2+ шүүлтүүртэй ObjStm), гүн үүрлэсэн массив/dictionary-аар
+  Lexer-ийн хязгааргүй рекурсыг өдөөнө. Одоо: бүтцийн шалгалт Go 900de73-ийн порт, Lexer-ийн гүн ≤ 512 → `PDF_INVALID`.
+- **Хязгааргүй задлалт (zip bomb):** FlateDecode нэг нээлтэд нийт ≤ 256 MiB; xref stream / ObjStm-д ганц шүүлтүүр.
+- **CPU шавхалт:** ObjStm-ийн асар том `/N` давталт өгөгдлийн төгсгөлд зогсоно; xref `/Prev` гинж ≤ 128; ObjStm-ийн гишүүн
+  хайлтын ажил ≤ 1 GiB.
+
+*English:* **`EidPades.Prepare` / `Seal` in `GeregeSystems.EidMongolia.Pades` 0.17.0 and earlier can be crashed by a crafted
+PDF. Upgrading to 0.18.0 is recommended for anyone who passes untrusted PDFs (for example user uploads) to the SDK.** A
+~1 KB PDF could bypass the structure pre-check and drive unbounded recursion in the lexer, ending the host process with an
+uncatchable `StackOverflowException`; decompression was unbounded; a huge object-stream `/N` caused a CPU-exhaustion loop.
+All three now fail with `PDF_INVALID`.
+
+Мөн энэ хувилбарт (cross-SDK `rp-conformance/2`): login cookie `__Host-` угтвартай ба давхардсан login cookie-г татгалзана;
+push-ийн rate-limit түлхүүрт иргэний дугаарын оронд HMAC; validator-ийн issuer allowlist зөвхөн олдсон issuer-ийн SKI;
+OCSP-ийн issuer/responder түлхүүрийн шалгалт — дэлгэрэнгүй доор.
+
+### Шинэчлэх тэмдэглэл / Upgrade notes
+
+- **Login cookie-ийн нэр** `__Host-eid_login` болсон (Secure, `CookieDomain`-гүй, `CookiePath` = `/` үед) — шинэчлэх үед
+  явагдаж буй нэвтрэлт НЭГ удаа `EXPIRED` болж дахин эхэлнэ. *In-progress logins restart once after the upgrade.*
+- **Өөрийн rate-limit hook** (`RateLimit` / `RateLimits[..].Func`) push-д `push:<hmac>` түлхүүр авна (регистрийн дугаар биш).
+  `push:<idCode>`-оор тохируулсан бол шинэчил. *Custom rate-limit hooks now receive `push:<hmac>` for push.*
+- **Маш том / олон revision-тэй PDF:** 128-аас олон xref хэсэгтэй эсвэл маш том object stream-тэй баримтыг `Prepare` / `Seal`
+  татгалзана, validator `PDF_INVALID` гэж тайлагнана. *Documents with more than 128 xref sections or very large object
+  streams are refused at Prepare/Seal and reported `PDF_INVALID` by the validator.*
+- **Харагдах дардасны `/Name`:** хожмын гарын үсгийн харагдах дардасны `/Name` нь гэрчилгээний харуулах нэртэй (GIVENNAME
+  SURNAME, эс бөгөөс CN) зөрвөл өмнөх гарын үсгүүд `modified_after_signing` болно. *A visible stamp whose `/Name` differs
+  from the certificate display name makes earlier signatures `modified_after_signing`.*
+- Нийтийн API-д зөвхөн нэмэлт (хуучин `SealAsync` delegate хэвээр).
+
+### Added — `EidPades.ValidatePdfAsync` (ValidatePDF)
+
+- **Юу:** гарын үсэгтэй/тамгалсан PDF-ийг бүрэн шалгах `EidPades.ValidatePdfAsync(pdf, ValidatePdfOptions?, CancellationToken)`
+  (Go `pades.ValidatePDF`, TS `validatePdf`, CA `/v3/validate/pdf`-тэй ижил дүрэм, ижил JSON тайлан — `PdfReport.ToJson()`):
+  ByteRange/messageDigest, CMS гарын үсэг (RSA PKCS#1/PSS, ECDSA), signing-certificate-v2, гинж (өөрийн path builder,
+  X509Chain биш), RFC 3161 цагийн тэмдэг, DSS-ийн OCSP/CRL ба онлайн OCSP/CRL (PAdES LTV-ийн 24 цагийн дүрэм), гарын үсгийн
+  дараах revision-ийн ангилал (modified_after_signing, харагдах гарын үсэг/тамга APPEARANCE_SPEC §5/§6 — QR-тэй тамга §6.5
+  оролцуулан), LTV, `signature_level`, `certificate_level`, `key_medium`. Нийтийн төрлүүд: `ValidatePdfOptions`, `PdfReport`,
+  `SignatureReport`, `CertInfo`, `CertRevocation`, `TimestampInfo`, `LtvInfo`.
+- **Яагаад:** .NET SDK-д TS/Go-той ижил хүрээтэй PDF шалгалт (SDK parity WP 7).
+- **Хаана:** `src/GeregeSystems.EidMongolia.Pades/ValidatePdf.cs`, `Validation/*` (шинэ); `Pdf/SignatureAppearance.cs`
+  (`sealQr` сонголт — бичигчийн гаралт өөрчлөгдөөгүй); `Pdf/PdfDocument.cs` (FlateDecode тайлалт 64 MiB-аар хязгаарлагдсан —
+  TS reader-тэй ижил, халдагчийн zip bomb санах ойг дүүргэхгүй); корпус `testdata/pades-validate` (`build/sync-validate.sh`,
+  CI `validate-sync`).
+- **Шалгасан:** корпусын бүх тохиолдол (Go-ийн тайлантай deep-equal), SHA256SUMS, зорилтот сөрөг/fuzz тест — PR CI (windows +
+  ubuntu).
+
+### Fixed — халдагчийн PDF-ийн DoS (PR #51 review; Prepare/Seal-д ч хамаарна)
+
+- `Pdf/Structure.cs`: Go 900de73 (v0.21.1)-ийн порт — тайлбар/мөр дэх `/Encrypt` бичвэр ObjStm-ийн шалгалтыг унтраахгүй;
+  `/Filter [/FlateDecode /FlateDecode]` (2+ шүүлтүүр) → бүтцийн алдаа; давхар/`null` `/Filter` — сүүлийнх нь (уншигчтай ижил).
+- `Pdf/Lexer.cs`: ReadObject/ReadArray/ReadDict-ийн рекурсын гүн ≤ 512 → `PdfFormatException` (PDF_INVALID), StackOverflow биш.
+- `Pdf/PdfDocument.cs`: ObjStm-ийн `/N` давталт өгөгдлийн төгсгөлд зогсоно; xref `/Prev` гинж ≤ 128; нэг нээлтэд FlateDecode
+  нийт ≤ 256 MiB; xref stream / ObjStm-д олон шүүлтүүр хориотой.
+- ValidatePdf: CMS-д ≤ 32 гэрчилгээ, гэрчилгээний pool хэшээр; RSA ≤ 8192 бит, e ≤ 2^32−1; RSA-PSS SHA-1 татгалзана (Go-тэй
+  ижил); гэрчилгээний нэрийг задлалтад шалгана (гэмтсэн бол тэр гарын үсэг `malformed_signature`); DSS-ийн нийт ≤ 8 MiB,
+  объектын давхардалгүй, OCSP/CRL-ийг баримтад нэг удаа шалгана; задлах үе шатны бүх алдаа PDF_INVALID (OOM ба цуцлалтыг
+  дамжуулна); бүтцийн шалгалт ба revision-ийн шинжилгээ CancellationToken-ийг дагана; `platform_attested` зөвхөн
+  өөрчлөгдөөгүй баримтад.
+
+### Security — `ValidatePdfAsync` хатууруулалт (корпус v14; Go PR #76, TS PR #100-ийн порт)
+
+- **Юу:**
+  - Shadow attack: гарын үсгийн revision-оос хойш xref-ийн мөр өөрчлөгдөөгүй объект (ба түүний ObjStm) тэр revision дотор
+    бүтнээрээ задрах ёстой — `/Length` нь гарын үсгийн мужаас цааш үргэлжилж хожмын revision-ийн байтаар «гүйцдэг» stream →
+    `modified_after_signing` (өмнө нь `valid`).
+  - Хожмын гарын үсгийн итгэл: зөвхөн бүрэн бүтэн (integrity) хожмын гарын үсэг л «гарын үсгээр өргөтгөсөн» гэж тооцогдоно;
+    харагдах дардасны `/Name` нь тэр гарын үсгийн гэрчилгээний харуулах нэртэй (GIVENNAME SURNAME, эс бөгөөс CN) яг тэнцүү
+    байх ёстой. **Интеграторт:** өөр нэртэй дардас (эсвэл эвдэрсэн хожмын гарын үсэг) нэмсэн баримтад өмнөх гарын үсгүүд
+    `modified_after_signing` болно.
+  - SignerInfo-ийн гарын үсгийн алгоритм SHA-1/MD5/MD2 (sha1/md5/md2WithRSA, dsa-with-sha1, ecdsa-with-SHA1, OIW sha1WithRSA)
+    → `weak_algorithm` (digest SHA-256 байсан ч).
+  - Бүтцийн урьдчилсан шалгалт (Go `CheckStructure`-тай ижил): xref хэсэг ≤ 128, xref stream-ийн `/W` элемент 0…8 ба мөрийн
+    урт > 0, `/Index` start + count ≤ 2^21, бүх xref stream-ийн мөр ≤ 2^21, xref stream-д ганц шүүлтүүр, задалсан xref stream
+    32 MiB-ийн төсөвт (ObjStm-тэй хамт), ObjStm-ийн гишүүн хайлтын ажил ≤ 1 GiB; ObjStm-ийн offset-ийг уншигчтай яг ижлээр
+    (бүхэл бус → 0, сөрөг байрлал → алдаа). **Интеграторт:** 128-аас олон incremental update-тэй эсвэл маш олон ObjStm
+    гишүүнтэй баримт `PDF_INVALID` (Prepare/Seal-д ч).
+  - Гэрчилгээний хязгаар: CMS ба цагийн тэмдгийн токен бүрд ≤ 32 гэрчилгээ, RSA ≤ 8192 бит, e ≤ 2^32−1, serial ≤ 160 бит —
+    гарын үсэгт `malformed_signature`, токенд TSA-гүй (TSTInfo-ийн цаг хэвээр — Go-той ижил); TSTInfo serial > 160 бит →
+    цагийн тэмдэг задрахгүй.
+  - Уншигч: ObjStm-ийн толгойг нэг удаа индексжүүлнэ (гишүүн бүрд дахин уншихгүй); xref stream-ийн мөрийн урт 0 ба нийт мөр
+    > max(/Size, 2^21) → алдаа; xref хэсэг ≤ 128 (өмнө нь 129).
+  - `platform_attested` зөвхөн `covers_whole_document` эсвэл `extended_by_signatures_only` үед — өмнөх .NET-ийн нэмэлт одоо
+    Go/TS-ийн дүрэм (тайлбар л өөрчлөгдсөн).
+- **Яагаад:** .NET/Java порт review-ийн дараах reference-ийн хатууруулалт; тайлан Go/TS-тэй байт-ижил байх.
+- **Хаана:** `Pdf/Structure.cs`, `Pdf/PdfDocument.cs`, `Validation/Extract.cs`, `Validation/Revisions.cs`,
+  `Validation/OwnAppearance.cs`, `Validation/Evaluate.cs`; корпус `testdata/pades-validate` = Go `222acbd` (v14, 80
+  тохиолдол; `build/go-sdk-validate.ref`); README (3 хэл) — хязгаарын жагсаалт.
+- **Шалгасан:** корпусын 80 тохиолдол Go-ийн тайлантай deep-equal, `ValidatePdfHardeningTests`-ийн шинэ тестүүд — PR CI
+  (windows + ubuntu).
+
+### Added — rp-conformance/2, тамганы бүртгэл (CA V158), PAdES golden v13
+
+- **Юу.** (1) Cross-SDK корпус `rp-conformance/2`-г Go `a537226`-оос (`build/go-sdk-conformance.ref`) дахин хуулж, бүхэлд нь
+  давна: rp-validate 88, OCSP 24, wire 26, eidlogin 34 сценари; eidlogin harness шинэ оролтуудыг (`wireCookieName`,
+  `cookieDomain`, `cookiePath`, `clientIp`, `auditKeyHex`, `rateLimits`, `cookieHeader`, `absentAttributes`) ойлгоно
+  (танихгүй түлхүүр → FAIL хэвээр). (2) Тамганы бүртгэл — `client.Seal.RegisterSealedPdfAsync(orgEtsi, SealRegistration)`
+  (`POST /seal/{orgEtsi}/registrations`; сүлжээгүй хэлбэрийн шалгалт, 201 → `Created`, PRIOR_MISMATCH-ийн хослолын давталт),
+  `client.Seal.SealForDocumentAsync` (`{docId, revIndex}` нөөц), `SealRegisterErrorCodes.All` (CA-ийн дараалал), шинэ кодууд
+  `SEAL_NOT_FOUND` / `SEAL_DOC_MISMATCH` / `DOC_ID_RESERVED` (`EidSealNotFoundException`, `EidSealDocMismatchException`,
+  `EidDocIdReservedException`). Pades: `SealOptions.Qr` / `DocId` / `FileName`, нөөцөлдөг `SealAsync` overload
+  (`SealReservation`; хуучин delegate хэвээр), `EidPades.SealRegistration(completed)`, `Completed.SealRegistration`; QR-тэй
+  тамганы дардас (APPEARANCE_SPEC §6.5) ба docId-ийн дүрэм (§6.6 — verify хуудас, дараа нь хамгийн эрт /EIDVerify тамга,
+  дараа нь options; гарын үсэгтэй баримтад санамсаргүй docId үүсгэхгүй). PAdES golden v12 → v13 (`build/go-sdk.ref` = Go
+  `a537226`, golden нь `499aa5c`-тэй ижил). (3) Гэрээний тест: `POST /seal/{orgEtsi}/registrations` замын хүснэгтэд (33 зам),
+  `endpoints.seal.registration`-ийн талбарууд, `seal.registerErrorCodes`, `{docId, revIndex}` нөөцийг live discovery-тэй
+  тулгана.
+- **Яагаад.** Go #74/#75 ба TS #98/#99-тэй нийцэл (нэг корпус, нэг дүрэм) ба CA V158-ийн QR-тэй тамга.
+- **Хаана.** `src/GeregeSystems.EidMongolia/{Validator,Ocsp,SealRegister,Seal,Errors,Http,Routes}.cs`, `Login/*`;
+  `src/GeregeSystems.EidMongolia.Pades/{Seal,EidPades,Prechecks,Models}.cs`, `Pdf/SignatureAppearance.cs`; тестүүд;
+  `testdata/conformance`, `testdata/golden`; README (mn/en/zh).
+- **Шалгасан.** PR CI (windows + ubuntu, net8.0 + net10.0; `conformance-sync`, `golden-sync`, `compat`, `contract`).
+
+#### Security (rp-conformance/2)
+
+- **Login cookie-ийн анхдагч нэр `__Host-eid_login`** (Secure, `CookieDomain`-гүй, `CookiePath` = `/` үед; бусад үед
+  `eid_login`; өгсөн `CookieName` хэвээр). Шинэчилсний дараа явагдаж буй нэвтрэлт (хуучин `eid_login` cookie-тэй) НЭГ удаа
+  `EXPIRED` болж дахин эхэлнэ. Хүсэлтэд login cookie нэгээс олон бол cookie-гүй гэж үзнэ (дэд домэйн / өөр замаас тарьсан
+  cookie жинхэнийг сүүдэрлэхгүй) — status `EXPIRED`, callback `eid_error=expired`.
+- **Rate-limit түлхүүр:** push нь `push:<pushKey>` (`AuditKey`-ийн HMAC, `OnEvent`-ийн `meta.pushKey`-тэй ижил) — регистрийн
+  дугаар хязгаарлагч ба өөрийн `RateLimit` / `RateLimits[..].Func` hook-д ОЧИХГҮЙ. Өөрийн hook-оо `push:<idCode>`-оор
+  тохируулсан бол шинэчил. `ClientIp` тохируулсан ч IP хоосон бол нийтийн `start:unknown` bucket (өмнө нь хязгааргүй); IPv6
+  /64 түлхүүр нь 4 hextet, тэг хураахгүй (`fe80:0:0:0::/64`; өмнө нь `fe80::/64`), `[…]` ба `%zone` зөвшөөрнө. Санах ойн
+  хязгаарлагч дүүрвэл шинэ түлхүүр татгалзагдахгүй — нэг нийтийн overflow bucket (`EidLoginRateRule.MaxKeys`, анхдагч 10 000).
+- **Validator:** issuer allowlist нь олдсон issuer-ийн ЗӨВХӨН SKI-г (SKI extension-гүй CA-д RFC 5280 арга 1-ийн танигч)
+  тулгана; leaf-ийн AKI зөвхөн issuer олдоогүй үед (AllowUntrusted) — өмнө нь SKI-гүй issuer-т leaf-ийн AKI-д буцдаг байсан.
+- **OCSP:** өгсөн issuer CA биш эсвэл RSA түлхүүр сул бол кэш/сүлжээнээс өмнө `no_issuer`; delegated responder-ийн сул RSA
+  түлхүүр → `signature`; serial-тай БҮХ SingleResponse-ийн CertID issuer-тэй таарна (эс бөгөөс `invalid`).
+- Reason key-ийн нэр өөрчлөгдөөгүй: 0.17.0-ийн `cert.weak_key`, `subject.duplicate_identity` нь корпусын нэр, шалгах
+  дараалал (`cert.malformed`-ийн дараа) аль хэдийн ижил.
+
+### Release
+
+- Гурван csproj-ийн `<Version>` 0.18.0 (lockstep); README (mn/en/zh)-ийн суулгах мөр ба дэмжлэгийн хүснэгт 0.18.0.
+- `compat` job-ийн суурь Pades 0.16.0 хэвээр («Миний QR»-ийн type forwarding-ийн нийцэл; 0.17.0 → 0.18.0-д нийтийн төрөл
+  шилжээгүй).
+
 ## 0.17.0 — 2026-11-26
 
 **Гол өөрчлөлт:** гурван багц нэг хувилбартай (lockstep) гарна. Шинэ **`GeregeSystems.EidMongolia`** — TypeScript ба Go

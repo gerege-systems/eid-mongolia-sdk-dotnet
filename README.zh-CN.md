@@ -31,9 +31,9 @@ wire、登录后端）。
 从 [nuget.org](https://www.nuget.org/profiles/geregecore)：
 
 ```bash
-dotnet add package GeregeSystems.EidMongolia --version 0.17.0             # RP SDK
-dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.17.0  # 用于 ASP.NET Core（会带上 core）
-dotnet add package GeregeSystems.EidMongolia.Pades --version 0.17.0       # 客户端 PAdES（会带上 core）
+dotnet add package GeregeSystems.EidMongolia --version 0.18.0             # RP SDK
+dotnet add package GeregeSystems.EidMongolia.AspNetCore --version 0.18.0  # 用于 ASP.NET Core（会带上 core）
+dotnet add package GeregeSystems.EidMongolia.Pades --version 0.18.0       # 客户端 PAdES（会带上 core）
 ```
 
 每个版本的 `.nupkg`（+ `.snupkg` 符号包）也可在 [GitHub Releases](https://github.com/gerege-systems/eid-mongolia-sdk-dotnet/releases) 获取。
@@ -571,7 +571,7 @@ string json = rep.ToJson();
 
 ## 与 Go / TS 的功能对比
 
-| 功能 | .NET 0.17.0 | Go | TS |
+| 功能 | .NET 0.18.0 | Go | TS |
 |---|---|---|---|
 | Client、错误、路由表、discovery | ✓ | ✓ | ✓ |
 | 认证：push、device link（QR / Web2App / App2App）、QR ticker | ✓ | ✓ | ✓ |
@@ -587,9 +587,9 @@ string json = rep.ToJson();
 | “使用 eID 登录”后端 | ✓（+ ASP.NET Core） | ✓（`net/http`） | ✓（+ `<eid-login-button>`） |
 | PAdES prepare / complete / suggestPlacement / 登记请求体 | ✓ | ✓ | ✓ |
 | 完整 PDF 验证器（`ValidatePDF`） | ✓ `ValidatePdfAsync`（pades-validate/1） | ✓ | ✓ |
-| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：验证器、`SealAsync` 与 `Prepare` 的 docId） | ✓ main | ✓ v0.31.0 | ✓ 0.49.0 |
-| 印章登记（`POST /seal/{org}/registrations`）、`SealForDocument` | ✓ main | ✓ main | ✓ main |
-| 跨 SDK 语料 rp-conformance/2（验证器、OCSP、登录后端） | ✓ main | ✓ main | ✓ main |
+| 带 QR 的印章外观（APPEARANCE_SPEC §6.5–6.6，golden v13：验证器、`SealAsync` 与 `Prepare` 的 docId） | ✓ | ✓ v0.31.0 | ✓ 0.49.0 |
+| 印章登记（`POST /seal/{org}/registrations`）、`SealForDocument` | ✓ | ✓ main | ✓ main |
+| 跨 SDK 语料 rp-conformance/2（验证器、OCSP、登录后端） | ✓ | ✓ main | ✓ main |
 | `pdfDigest`、浏览器入口、`convert` | — | — | ✓（仅 TS） |
 
 ## 开发
