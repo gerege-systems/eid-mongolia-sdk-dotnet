@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace GeregeSystems.EidMongolia;
 
@@ -267,6 +268,28 @@ public sealed record DeviceLinkSession
     /// <summary>Session дуусах мөч; мэдэгдэхгүй бол null.</summary>
     [JsonPropertyName("expiresAt")]
     public DateTimeOffset? ExpiresAt { get; init; }
+
+    /// <summary>
+    /// <see cref="DeviceLink.Build"/>-ийн оролт (Go <c>DeviceLinkSession.LinkInput</c>): auth — Acsp, sign — Sign, cert —
+    /// RelyingPartyName + CallbackUrl. <paramref name="lang"/> — ISO 639-2 (mon, eng).
+    /// </summary>
+    public DeviceLinkInput LinkInput(string deviceLinkType, string lang) => DeviceLink.InputOf(this, deviceLinkType, lang);
+
+    /// <summary>
+    /// Холбоос угсарна (<see cref="DeviceLinkTypes"/>). QR-ийг секунд тутам дахин угсрах тул HTTP poll-д хүсэлт бүрд
+    /// дууд, SSE/WebSocket-д <see cref="TickQrAsync(string, TimeSpan, CancellationToken)"/>. <paramref name="now"/> null = одоо.
+    /// </summary>
+    /// <exception cref="EidDeviceLinkException">Оролт буруу (ж: Web2App-д callback-гүй session).</exception>
+    public string BuildLink(string deviceLinkType, string lang, DateTimeOffset? now = null) =>
+        DeviceLink.Build(LinkInput(deviceLinkType, lang) with { Now = now });
+
+    /// <summary>QR холбоосыг шууд, дараа нь <paramref name="interval"/> тутам гаргана (<see cref="DeviceLink.TickQrAsync(DeviceLinkInput, TimeSpan, CancellationToken)"/>).</summary>
+    public IAsyncEnumerable<string> TickQrAsync(string lang, TimeSpan interval, CancellationToken ct = default) =>
+        DeviceLink.TickQrAsync(LinkInput(DeviceLinkTypes.Qr, lang), interval, ct);
+
+    /// <summary><see cref="TickQrAsync(string, TimeSpan, CancellationToken)"/>, өгсөн цагаар (тест).</summary>
+    public IAsyncEnumerable<string> TickQrAsync(string lang, TimeSpan interval, TimeProvider timeProvider, CancellationToken ct = default) =>
+        DeviceLink.TickQrAsync(LinkInput(DeviceLinkTypes.Qr, lang), interval, timeProvider, ct);
 }
 
 /// <summary>Discovery-ийн <c>sessionTtl</c>: CA-ийн нэвтрэлт / гарын үсгийн session-ий амьдрах хугацаа. Алга бол Zero.</summary>

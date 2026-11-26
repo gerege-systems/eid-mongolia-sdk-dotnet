@@ -156,4 +156,128 @@ public class ContractTests
 
         Assert.True(missing.Count == 0, "SDK зам discovery-д алга:\n" + string.Join("\n", missing));
     }
+
+    /// <summary>Live discovery (EID_CONTRACT=1 үед); бусад үед null.</summary>
+    private async Task<JsonElement?> DiscoveryAsync()
+    {
+        if (Environment.GetEnvironmentVariable("EID_CONTRACT") != "1")
+        {
+            _out.WriteLine("EID_CONTRACT != 1 — гэрээний тест алгасав");
+            return null;
+        }
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        using var req = new HttpRequestMessage(HttpMethod.Get, DiscoveryUrl);
+        req.Headers.Accept.ParseAdd("application/json");
+        using var res = await http.SendAsync(req);
+        Assert.True(res.IsSuccessStatusCode, "GET " + DiscoveryUrl + ": HTTP " + (int)res.StatusCode);
+        using var d = JsonDocument.Parse(await res.Content.ReadAsByteArrayAsync());
+        return d.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Go contract_test.go TestContractPDFSignaturesBody: discovery-ийн endpoints.pdf.signatures-ийн биеийн талбарууд
+    /// (<c>{a, b?, …}</c>) нь <see cref="PdfSignatureRegistration"/>-ийн JSON түлхүүрүүдтэй ЯГ тэнцүү (CA DisallowUnknownFields).
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task PdfSignaturesBodyMatchesDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        var desc = d.GetProperty("endpoints").GetProperty("pdf").GetProperty("signatures").GetString() ?? "";
+        int i = desc.IndexOf('{', StringComparison.Ordinal), j = desc.IndexOf('}', StringComparison.Ordinal);
+        Assert.True(i >= 0 && j > i, "endpoints.pdf.signatures-д бие алга: " + desc);
+        var want = desc[(i + 1)..j].Split(',').Select(f => f.Trim().TrimEnd('?')).OrderBy(x => x, StringComparer.Ordinal);
+        var got = PdfTests.JsonNames(typeof(PdfSignatureRegistration)).OrderBy(x => x, StringComparer.Ordinal);
+        Assert.Equal(want, got);
+    }
+
+    /// <summary>Go contract_test.go TestContractPDFRegisterErrorCodes: pdfSigning.registerErrorCodes == <see cref="PdfErrorCodes.All"/> (олонлогоор).</summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task PdfRegisterErrorCodesMatchDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        if (!d.TryGetProperty("pdfSigning", out var ps) || !ps.TryGetProperty("registerErrorCodes", out var codes))
+        {
+            Assert.Fail("pdfSigning.registerErrorCodes discovery-д алга");
+            return;
+        }
+        var ca = codes.EnumerateArray().Select(x => x.GetString()!).Distinct().OrderBy(x => x, StringComparer.Ordinal);
+        Assert.Equal(ca, PdfErrorCodes.All.Distinct().OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    /// <summary>Go contract_test.go TestContractSealSwitches: seal блокийн disabledCode == SEAL_SERVICE_DISABLED.</summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task SealSwitchesMatchDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        Assert.True(d.TryGetProperty("seal", out var s), "discovery-д seal блок алга");
+        Assert.True(s.TryGetProperty("issuanceEnabled", out var ie) && ie.ValueKind is JsonValueKind.True or JsonValueKind.False);
+        Assert.True(s.TryGetProperty("sealingEnabled", out var se) && se.ValueKind is JsonValueKind.True or JsonValueKind.False);
+        Assert.Equal(EidErrorCodes.SealServiceDisabled, s.GetProperty("disabledCode").GetString());
+    }
+
+    /// <summary>
+    /// Go contract_test.go TestContractSealErrorCodes: endpoints.seal.*-ийн тайлбарт нэрлэсэн тамганы code бүр
+    /// <see cref="EidErrorCodes"/>-д байх ёстой, хүлээгдэж буй code-ууд тайлбарт байх ёстой.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task SealErrorCodesMatchDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        var known = typeof(EidErrorCodes).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()!).ToHashSet(StringComparer.Ordinal);
+        var codeRe = new Regex(@"\b(?:ORG_NOT_ACTIVE|SEAL_[A-Z_]+)\b");
+        var named = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var errors = new List<string>();
+        foreach (var p in d.GetProperty("endpoints").GetProperty("seal").EnumerateObject())
+        {
+            named[p.Name] = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in codeRe.Matches(p.Value.GetString() ?? ""))
+            {
+                named[p.Name].Add(m.Value);
+                if (!known.Contains(m.Value))
+                {
+                    errors.Add("endpoints.seal." + p.Name + ": SDK-д танигдаагүй code " + m.Value);
+                }
+            }
+        }
+        var want = new Dictionary<string, string[]>
+        {
+            ["seal"] = new[]
+            {
+                EidErrorCodes.OrgNotActive, EidErrorCodes.SealNotIssued, EidErrorCodes.SealCertRevoked, EidErrorCodes.SealKeyUnavailable,
+                EidErrorCodes.SealCertExpired, EidErrorCodes.SealCertNotYetValid, EidErrorCodes.SealServiceDisabled,
+            },
+            ["certificate_get"] = new[] { EidErrorCodes.SealNotIssued, EidErrorCodes.SealCertRevoked, EidErrorCodes.SealCertExpired, EidErrorCodes.SealCertNotYetValid },
+            ["certificate_issue"] = new[] { EidErrorCodes.OrgNotActive, EidErrorCodes.SealApproverUnavailable, EidErrorCodes.SealServiceDisabled },
+            ["grant_request"] = new[] { EidErrorCodes.OrgNotActive, EidErrorCodes.SealGrantAlreadyApproved, EidErrorCodes.SealApproverUnavailable },
+            ["grant_status"] = new[] { EidErrorCodes.SealGrantNotFound },
+        };
+        foreach (var (key, codes) in want)
+        {
+            foreach (var code in codes)
+            {
+                if (!named.TryGetValue(key, out var set) || !set.Contains(code))
+                {
+                    errors.Add("endpoints.seal." + key + "-д " + code + " алга");
+                }
+            }
+        }
+        Assert.True(errors.Count == 0, string.Join("\n", errors));
+    }
 }

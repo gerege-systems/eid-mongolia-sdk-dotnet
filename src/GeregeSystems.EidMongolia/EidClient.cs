@@ -40,13 +40,20 @@ public sealed class EidClientOptions
     /// null / "" = илгээхгүй (сервер mn).
     /// </summary>
     public string? Language { get; init; }
+
+    /// <summary>
+    /// Цаг (session-ий ReceivedAt / ExpiresAt-ийн тооцоолол, <see cref="SessionService.WaitForResultAsync"/>-ийн хугацаа).
+    /// null = <see cref="System.TimeProvider.System"/>; тестэд хянах боломжтой цаг өгнө.
+    /// </summary>
+    public TimeProvider? TimeProvider { get; init; }
 }
 
 /// <summary>
 /// eID Mongolia RP-API client (Go <c>eid.Client</c>, TS <c>EidClient</c>-ийн .NET порт — хөгжүүлэлт явагдаж байна).
-/// Одоогоор: тохиргоо, HTTP давхарга, алдаа, discovery (<see cref="AuthService.SessionTtlAsync"/>). Auth / Sign / Session /
-/// Validator үйлчилгээ дараагийн хувилбаруудад. mTLS: client certificate-тэй <see cref="HttpClient"/>-ийг конструкторт
-/// өгнө. Thread-safe.
+/// Одоогоор: тохиргоо, HTTP давхарга, алдаа, <see cref="Auth"/> (push / device link + discovery), <see cref="Sign"/>
+/// (digest / text / linked / device link / certificate-choice), <see cref="Session"/> (poll / wait), <see cref="Pdf"/>
+/// (<c>POST /pdf/signatures</c>). Validator дараагийн хувилбарт. mTLS: client certificate-тэй <see cref="HttpClient"/>-ийг
+/// конструкторт өгнө. Thread-safe.
 /// </summary>
 public sealed class EidClient : IDisposable
 {
@@ -102,7 +109,12 @@ public sealed class EidClient : IDisposable
         PdfTimeout = options.PdfTimeout is { } pt && pt > TimeSpan.Zero ? pt : DefaultPdfTimeout;
         DefaultCertificateLevel = string.IsNullOrEmpty(options.DefaultCertificateLevel) ? CertificateLevels.Qualified : options.DefaultCertificateLevel;
         Http = new EidHttp(BaseUrl, options.Credentials.ApiSecret, Timeout, _http, options.Language);
+        Clock = options.TimeProvider ?? TimeProvider.System;
+        SignSessionTtl = options.SignSessionTtl is { } st && st > TimeSpan.Zero ? st : SessionTimes.DefaultSignSessionTtl;
         Auth = new AuthService(this);
+        Sign = new SignService(this);
+        Session = new SessionService(this);
+        Pdf = new PdfService(this);
     }
 
     /// <summary>Шалгасан суурь URL (төгсгөлийн "/"-гүй).</summary>
@@ -123,10 +135,27 @@ public sealed class EidClient : IDisposable
     /// <summary>Auth/sign-ийн анхдагч certLevel.</summary>
     public string DefaultCertificateLevel { get; }
 
-    /// <summary>Нэвтрэлт (одоогоор зөвхөн discovery-ийн session TTL).</summary>
+    /// <summary>Sign / certificate-choice session-ий ExpiresAt-ийн тооцоолол (CA expiresAt буцаагаагүй үед).</summary>
+    public TimeSpan SignSessionTtl { get; }
+
+    /// <summary>Нэвтрэлт: push / device link, discovery-ийн session TTL.</summary>
     public AuthService Auth { get; }
 
+    /// <summary>Гарын үсэг: digest / text / linked / device link, certificate-choice.</summary>
+    public SignService Sign { get; }
+
+    /// <summary>Session poll / хүлээлт.</summary>
+    public SessionService Session { get; }
+
+    /// <summary>Клиент талын PAdES гарын үсгийн бүртгэл (<c>POST /pdf/signatures</c>).</summary>
+    public PdfService Pdf { get; }
+
     internal EidHttp Http { get; }
+
+    internal TimeProvider Clock { get; }
+
+    /// <summary>RP challenge үүсгэгч (тестэд тогтмол утгаар солино; анхдагч 64 санамсаргүй байт).</summary>
+    internal Func<string> NewChallenge { get; set; } = () => EidCrypto.RandomChallenge(64);
 
     /// <inheritdoc/>
     public void Dispose()
@@ -182,8 +211,11 @@ public sealed class EidClient : IDisposable
     }
 }
 
-/// <summary>Нэвтрэлтийн үйлчилгээ (Go <c>AuthService</c>). Push / device-link эхлүүлэх нь дараагийн хувилбарт.</summary>
-public sealed class AuthService
+/// <summary>
+/// Нэвтрэлтийн үйлчилгээ (Go <c>AuthService</c>, TS <c>AuthApi</c>): иргэнийг PIN1-ээр нэвтрүүлнэ. Бүгд rpChallenge
+/// үүсгэж, хариуны ACSP_V2 гарын үсгийг validator-оор шалгана.
+/// </summary>
+public sealed partial class AuthService
 {
     private readonly EidClient _c;
 

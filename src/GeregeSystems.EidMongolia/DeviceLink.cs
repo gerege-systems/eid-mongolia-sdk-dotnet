@@ -86,7 +86,7 @@ public static class DeviceLink
     /// QR:      {base}?deviceLinkType=QR&amp;elapsedSeconds={E}&amp;sessionToken={T}&amp;sessionType={S}&amp;version=1.0&amp;lang={L}&amp;authCode={A}
     /// Web2App: {base}?deviceLinkType=Web2App&amp;sessionToken={T}&amp;sessionType={S}&amp;version=1.0&amp;lang={L}&amp;authCode={A}
     /// </code>
-    /// QR холбоос ~20 секундэд хүчингүй болдог тул секунд тутам дахин дуудна (<see cref="TickQrAsync"/>). Оролт буруу бол
+    /// QR холбоос ~20 секундэд хүчингүй болдог тул секунд тутам дахин дуудна (<see cref="TickQrAsync(DeviceLinkInput, TimeSpan, CancellationToken)"/>). Оролт буруу бол
     /// <see cref="EidDeviceLinkException"/>.
     /// </summary>
     public static string Build(DeviceLinkInput p)
@@ -242,20 +242,28 @@ public static class DeviceLink
     /// <paramref name="ct"/> цуцлагдах хүртэл. Оролт буруу бол эхний алхамд <see cref="EidDeviceLinkException"/>. HTTP
     /// poll ашиглавал хэрэггүй — хүсэлт бүрд <see cref="Build"/> дууд.
     /// </summary>
-    public static async IAsyncEnumerable<string> TickQrAsync(DeviceLinkInput input, TimeSpan interval,
+    public static IAsyncEnumerable<string> TickQrAsync(DeviceLinkInput input, TimeSpan interval, CancellationToken ct = default) =>
+        TickQrAsync(input, interval, TimeProvider.System, ct);
+
+    /// <summary>
+    /// <see cref="TickQrAsync(DeviceLinkInput, TimeSpan, CancellationToken)"/>, <paramref name="timeProvider"/>-ийн цаг ба
+    /// таймераар (elapsedSeconds = timeProvider-ийн одоо − ReceivedAt).
+    /// </summary>
+    public static async IAsyncEnumerable<string> TickQrAsync(DeviceLinkInput input, TimeSpan interval, TimeProvider timeProvider,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         if (interval <= TimeSpan.Zero)
         {
             interval = TimeSpan.FromSeconds(1);
         }
         var qr = input with { DeviceLinkType = DeviceLinkTypes.Qr };
-        yield return Build(qr with { Now = DateTimeOffset.UtcNow });
-        using var timer = new PeriodicTimer(interval);
+        yield return Build(qr with { Now = timeProvider.GetUtcNow() });
+        using var timer = new PeriodicTimer(interval, timeProvider);
         while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
-            yield return Build(qr with { Now = DateTimeOffset.UtcNow });
+            yield return Build(qr with { Now = timeProvider.GetUtcNow() });
         }
     }
 }
