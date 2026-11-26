@@ -107,6 +107,8 @@ internal static class Asn1
     /// <summary>OID агуулга → "1.2.3" (TS oidString).</summary>
     public static string OidString(ReadOnlySpan<byte> v)
     {
+        // Халдагчийн мегабайтын OID-ийн BigInteger өсөлт квадрат ажил болно; Go asn1 ийм OID-ийг ч задлахгүй.
+        if (v.Length > 128) throw new Asn1Exception("asn1: OID too long");
         var parts = new List<BigInteger>();
         BigInteger cur = BigInteger.Zero;
         foreach (var b in v)
