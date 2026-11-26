@@ -9,9 +9,17 @@ namespace GeregeSystems.EidMongolia;
 
 // Validator / OCSP-ийн X.509 давхарга: DER-ийг System.Formats.Asn1-ээр шууд задалж, гарын үсгийг RSA/ECDsa-аар шалгана.
 // X509Chain (Windows CAPI / Linux OpenSSL / macOS — платформ бүрд өөр, AIA татаж болзошгүй) ХЭРЭГЛЭХГҮЙ: гинжийг
-// ResponseValidator өөрөө угсарна (TS validator.ts verifyChain). Задлалтын дүрэм Go crypto/x509 ParseCertificate-тэй
-// ижил чангатай: DER, давхардсан extension, tbs ↔ гадна гарын үсгийн алгоритм, Name-ийн мөрийн төрөл, мэдэгдэх
-// extension-ий бүтэц, RSA/EC түлхүүр.
+// ResponseValidator өөрөө угсарна (TS validator.ts verifyChain).
+//
+// Задлалт ШАЛГАДАГ: чанд DER (AsnReader DER горим, дотоод бүтцийн араас илүү байт үгүй); version 1–3; tbs ба гадна
+// signatureAlgorithm байт-ижил; давхардсан extension; issuer/subject Name-ийн утгын мөрийн төрөл (Go parseName-ийн
+// жагсаалт); basicConstraints, keyUsage, extKeyUsage, SKI, AKI keyIdentifier, certificatePolicies (OID-ууд),
+// authorityInfoAccess (OCSP URI)-ийн бүтэц; RSA (rsaEncryption) / EC (P-256/384/521) түлхүүрийн import; RSA modulus
+// ≥ 2048 бит, exponent сондгой ба ≥ 3 (сул бол WeakKey — гарын үсэгт хэзээ ч тэнцэхгүй).
+// Задлалт ШАЛГАДАГГҮЙ (Go crypto/x509-тэй ижил гэж ҮЗЭХГҮЙ): subjectAltName, nameConstraints (байвал гинж fail-closed),
+// cRLDistributionPoints, policy qualifiers / constraints / mappings-ийн агуулга; сөрөг serial; extension ба version-ий
+// уялдаа; issuer/subjectUniqueID; UTCTime/GeneralizedTime-ийн оны дүрэм (AsnReader-ийн DER дүрэм л); Ed25519 ба бусад
+// түлхүүрийн төрөл (KeyKind.Other — гарын үсэгт тэнцэхгүй).
 
 /// <summary>AlgorithmIdentifier: OID + параметрийн түүхий DER (алга бол null).</summary>
 internal sealed record AlgorithmId(string Oid, byte[]? Parameters)
@@ -68,6 +76,9 @@ internal sealed class ParsedCert
     public const int KuKeyEncipherment = 0x20;
     public const int KuKeyCertSign = 0x04;
 
+    /// <summary>RSA modulus-ийн доод хэмжээ (бит): leaf, CA, OCSP responder бүгдэд.</summary>
+    public const int MinRsaBits = 2048;
+
     private ParsedCert()
     {
     }
@@ -85,6 +96,13 @@ internal sealed class ParsedCert
     public byte[] Spki { get; private set; } = Array.Empty<byte>();
     public byte[] PublicKeyBits { get; private set; } = Array.Empty<byte>();
     public KeyKind KeyKind { get; private set; }
+    /// <summary>RSA modulus-ийн бит; бусад түлхүүрт 0.</summary>
+    public int RsaBits { get; private set; }
+    /// <summary>
+    /// RSA түлхүүр сул: modulus &lt; <see cref="MinRsaBits"/>, эсвэл exponent тэгш / &lt; 3. Ийм түлхүүрээр
+    /// <see cref="Verifies"/> ба validator-ийн гарын үсгийн шалгалт үргэлж false; leaf бол cert.weak_key.
+    /// </summary>
+    public bool WeakKey { get; private set; }
     /// <summary>EC түлхүүрийн namedCurve OID; бусад үед "".</summary>
     public string Curve { get; private set; } = "";
     public IReadOnlyList<CertExtension> Extensions { get; private set; } = Array.Empty<CertExtension>();
@@ -293,13 +311,26 @@ internal sealed class ParsedCert
         return c;
     }
 
-    /// <summary>Түлхүүрийн төрөл; RSA/EC бол import хийж шалгана (Go ParseCertificate түлхүүрийг задалдаг).</summary>
+    /// <summary>
+    /// Түлхүүрийн төрөл; RSA/EC бол import хийж шалгана (Go ParseCertificate түлхүүрийг задалдаг). RSA-ийн modulus-ийн бит
+    /// ба exponent-ийг <see cref="WeakKey"/>-д (Go crypto/rsa &lt; 1024-ийг татгалздаг; SDK-ийн доод хэмжээ 2048).
+    /// </summary>
     private void SetKey(AlgorithmId keyAlg)
     {
         if (keyAlg.Oid == OidRsaEncryption)
         {
             KeyKind = KeyKind.Rsa;
-            CreateRsa().Dispose();
+            using var k = CreateRsa();
+            var p = k.ExportParameters(false);
+            var m = p.Modulus ?? Array.Empty<byte>();
+            var i = 0;
+            while (i < m.Length && m[i] == 0)
+            {
+                i++;
+            }
+            RsaBits = i == m.Length ? 0 : (m.Length - i) * 8 - (BitOperations.LeadingZeroCount((uint)m[i]) - 24);
+            var e = new BigInteger(p.Exponent ?? Array.Empty<byte>(), isUnsigned: true, isBigEndian: true);
+            WeakKey = RsaBits < MinRsaBits || e < 3 || e.IsEven;
             return;
         }
         if (keyAlg.Oid == OidEcPublicKey)
@@ -495,7 +526,7 @@ internal sealed class ParsedCert
 
     private bool RsaVerify(byte[] data, byte[] signature, HashAlgorithmName h, RSASignaturePadding p)
     {
-        if (KeyKind != KeyKind.Rsa)
+        if (KeyKind != KeyKind.Rsa || WeakKey)
         {
             return false;
         }

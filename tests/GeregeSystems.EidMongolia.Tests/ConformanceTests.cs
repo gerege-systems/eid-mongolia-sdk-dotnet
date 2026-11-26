@@ -202,6 +202,7 @@ public class ConformanceTests
         var o = c.TryGetProperty("options", out var oo) ? oo : default;
         X509Certificate2? cert = null;
         CertSubject? subject = null;
+        Signer? signer = null;
         string doc = "", level = "", alg = "";
         Exception? err = null;
         try
@@ -233,13 +234,8 @@ public class ConformanceTests
                     }
                 case "certificateChoice":
                     {
-                        var sessionId = Corpus.Opt(c, "certChoiceSessionId");
-                        var s = v.ValidateCertificateChoice(r, sessionId);
-                        (cert, subject, doc, level) = (s.Certificate, s.Subject, s.DocumentNumber, s.CertificateLevel);
-                        Assert.Equal(sessionId, s.CertChoiceSessionId);
-                        Assert.Equal(Convert.ToBase64String(s.Certificate.RawData), s.CertificateDerB64);
-                        SignerRef sr = s;
-                        Assert.Equal(new SignerRef(s.DocumentNumber, sessionId), sr);
+                        signer = v.ValidateCertificateChoice(r, Corpus.Opt(c, "certChoiceSessionId"));
+                        (cert, subject, doc, level) = (signer.Certificate, signer.Subject, signer.DocumentNumber, signer.CertificateLevel);
                         break;
                     }
                 default:
@@ -278,6 +274,15 @@ public class ConformanceTests
             new[] { Corpus.Str(es, "serialNumber"), Corpus.Str(es, "givenName"), Corpus.Str(es, "surname"), Corpus.Str(es, "country"), Corpus.Str(es, "commonName") },
             new[] { subject!.SerialNumber, subject.GivenName, subject.Surname, subject.Country, subject.CommonName });
         Assert.Equal(subject, ResponseValidator.ParseSubject(cert));
+        if (signer is not null)
+        {
+            // README §rp-validate: signer нь certChoiceSessionId-г (кейсийн талбар) echo хийж, certificateDerB64 нь
+            // гэрчилгээний base64 — түүний SHA-256 нь expect.ok.certificateSha256; SignerRef нь expect.ok.documentNumber.
+            Assert.Equal(Corpus.Str(ok, "certificateSha256"), Corpus.Sha256Hex(Convert.FromBase64String(signer.CertificateDerB64)));
+            Assert.Equal(Corpus.Str(c, "certChoiceSessionId"), signer.CertChoiceSessionId);
+            SignerRef sr = signer;
+            Assert.Equal(new SignerRef(Corpus.Str(ok, "documentNumber"), Corpus.Str(c, "certChoiceSessionId")), sr);
+        }
     }
 
     // ── OCSP ──

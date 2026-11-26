@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -59,6 +60,80 @@ public class ValidatorTests
         }));
         // ":"-тэй, том үсэгтэй SKI зөвшөөрөгдөнө (Go/TS).
         _ = new ResponseValidator(new TrustConfig { AllowedIssuerSkis = new[] { "B8:A3:7F" } });
+
+        // Үл мэдэх RequiredLevel чимээгүй QUALIFIED болохгүй.
+        Assert.Throws<ArgumentException>(() => new ResponseValidator(new TrustConfig { RequiredLevel = "qualified" }));
+        Assert.Throws<ArgumentException>(() => new ResponseValidator(new TrustConfig { RequiredLevel = "HIGH" }));
+        _ = new ResponseValidator(new TrustConfig { RequiredLevel = CertificateLevels.Qscd });
+
+        // Trust pool-д сул (1024 бит) RSA түлхүүртэй CA.
+        using var weak = RSA.Create(1024);
+        var req = new CertificateRequest("CN=TEST ONLY weak CA", weak, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        using var ca = req.CreateSelfSigned(Now.AddDays(-1), Now.AddDays(1));
+        var pem = new string(PemEncoding.Write("CERTIFICATE", ca.RawData));
+        Assert.True(ParsedCert.ParsePem(pem).Single().WeakKey);
+        Assert.Throws<ArgumentException>(() => new ResponseValidator(new TrustConfig { TrustAnchorsPem = new[] { pem } }));
+        Assert.Throws<ArgumentException>(() => new ResponseValidator(new TrustConfig { IntermediatesPem = new[] { pem } }));
+    }
+
+    [Fact]
+    public void CorpusAndEmbeddedKeysAreNotWeak()
+    {
+        // RSA-ийн доод хэмжээ 2048 нь корпус ба бодит гинжийн нэг ч түлхүүрийг татгалзахгүй.
+        var pems = Directory.EnumerateFiles(Path.Combine(Corpus.Dir, "pki"), "*.pem").Select(File.ReadAllText)
+            .Append(EidTrust.NationalRootCaPem).Concat(EidTrust.CitizenIntermediatesPem).ToList();
+        Assert.True(pems.Count > 30);
+        foreach (var c in pems.Select(p => ParsedCert.ParsePem(p).Single()))
+        {
+            Assert.False(c.WeakKey, c.SerialHex());
+            Assert.True(c.KeyKind == KeyKind.Ec || c.RsaBits >= ParsedCert.MinRsaBits, c.SerialHex() + ": " + c.RsaBits);
+        }
+    }
+
+    [Fact]
+    public void WeakLeafKeyIsRejected()
+    {
+        var c = Corpus.Case(RpValidate, "auth-pss-sha512-qr");
+        var r = SessionService.ParseSessionResult(c.GetProperty("session").GetRawText());
+        var acsp = System.Text.Json.JsonSerializer.Deserialize<AcspContext>(c.GetProperty("acsp").GetRawText(), EidHttp.Json)!;
+        using var weak = RSA.Create(1024);
+        var req = new CertificateRequest("CN=TEST ONLY weak leaf", weak, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        using var leaf = req.CreateSelfSigned(Now.AddDays(-1), Now.AddDays(1));
+        var bad = r with { CertificateDerB64 = Convert.ToBase64String(leaf.RawData) };
+        Assert.Equal(ValidationReasons.CertWeakKey, Assert.Throws<EidValidationException>(() => Default(Now).ValidateAuth(bad, acsp)).Reason);
+        // AllowUntrusted (гинжгүй) үед ч сул түлхүүрийн гарын үсэгт итгэхгүй.
+        var untrusted = new ResponseValidator(new TrustConfig { AllowUntrusted = true }, new ManualClock(Now));
+        Assert.Equal(ValidationReasons.CertWeakKey, Assert.Throws<EidValidationException>(() => untrusted.ValidateAuth(bad, acsp)).Reason);
+    }
+
+    [Theory]
+    [InlineData(ResponseValidator.EkuClientAuth)]
+    [InlineData(ResponseValidator.EkuEmailProtection)]
+    public void RealEmbeddedChainPassesFullCaChecks(string usage)
+    {
+        // Production гинж: иргэний leaf → 04 → 03 → 02 → 01 (anchor). CA бүрийг замын угсралтын БҮТЭН шалгалтаар (CA,
+        // keyCertSign, хугацаа, pathLen = доорх CA-ийн тоо, name constraints, critical extension, EKU давхарга), тогтмол
+        // цагт — шинэ дүрэм бодит гэрчилгээг чимээгүй татгалзвал энд улаан болно.
+        var at = new DateTimeOffset(2026, 11, 26, 0, 0, 0, TimeSpan.Zero);
+        var root = ParsedCert.ParsePem(EidTrust.NationalRootCaPem).Single();
+        var inter = EidTrust.CitizenIntermediates;
+        var path = new[] { inter[2], inter[1], inter[0], root };
+        for (var i = 0; i < path.Length; i++)
+        {
+            Assert.InRange(at, path[i].NotBefore, path[i].NotAfter);
+            Assert.False(path[i].WeakKey);
+            var fail = ResponseValidator.CaFail(path[i], i, at, usage);
+            Assert.False(fail.HasValue, i + ": " + fail?.Key + " " + fail?.Text);
+            if (i + 1 < path.Length)
+            {
+                Assert.True(ResponseValidator.SignedBy(path[i], path[i + 1]), i + ": гарын үсэг / нэр / AKI");
+            }
+        }
+        // Угсралт 04-өөс anchor хүртэл (01-г зөвхөн anchor-аар).
+        var v = new ResponseValidator(new TrustConfig { TrustAnchorsPem = new[] { EidTrust.NationalRootCaPem } }, new ManualClock(at));
+        v.VerifyChain(inter[2], usage, at);
     }
 
     [Fact]

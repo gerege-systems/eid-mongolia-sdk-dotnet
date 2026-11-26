@@ -59,13 +59,19 @@ public sealed record TrustConfig
     /// </summary>
     public IReadOnlyList<string>? IntermediatesPem { get; init; }
 
-    /// <summary>Шаардах certLevel (null / "" = QUALIFIED). Шаардсанаас дээш түвшнийг хүлээн авна (QSCD ⊇ QUALIFIED).</summary>
+    /// <summary>
+    /// Шаардах certLevel (<see cref="CertificateLevels"/>; null / "" = QUALIFIED). Шаардсанаас дээш түвшнийг хүлээн авна
+    /// (QSCD ⊇ QUALIFIED). Үл мэдэх утга → <see cref="ResponseValidator"/>-ийн конструкторт <see cref="ArgumentException"/>.
+    /// </summary>
     public string? RequiredLevel { get; init; }
 
     /// <summary>Гэрчилгээний хугацааг шалгахад зөвшөөрөх цагийн зөрүү (анхдагч 0).</summary>
     public TimeSpan ClockSkew { get; init; }
 
-    /// <summary>Trust anchor өгөөгүй ч баталгаажуулалт үргэлжлүүлнэ (гинж шалгахгүй). ЗӨВХӨН dev/тест.</summary>
+    /// <summary>
+    /// Trust anchor өгөөгүй ч баталгаажуулалт үргэлжлүүлнэ: гинж ШАЛГАХГҮЙ тул гэрчилгээ ба түүний түлхүүр нь хариуны
+    /// өөрийнх (self-asserted) — гарын үсэг таарсан нь иргэнийг баталгаажуулахгүй. ЗӨВХӨН dev/тест; production-д хэзээ ч.
+    /// </summary>
     public bool AllowUntrusted { get; init; }
 
     /// <summary>Цуцлалт шалгагч; null бол <see cref="ResponseValidator.CheckRevocationAsync"/> → <see cref="RevocationStatus.Skipped"/>.</summary>
@@ -76,8 +82,9 @@ public sealed record TrustConfig
 
     /// <summary>
     /// Иргэний гэрчилгээг шууд гаргасан CA-ийн Subject Key Identifier (hex, ":" зөвшөөрнө). Хоосон бол trust anchor
-    /// тохируулсан үед <c>[<see cref="EidTrust.CitizenIssuingCaSki"/>]</c>. Өгвөл энэ жагсаалтаар (үргэлж, AllowUntrusted
-    /// үед ч) шалгана.
+    /// тохируулсан үед <c>[<see cref="EidTrust.CitizenIssuingCaSki"/>]</c>. Шалгалт нь trust pool-оос олдсон шууд
+    /// issuer-ийн SKI-г тулгана; issuer олдохгүй бол (ж: <see cref="AllowUntrusted"/>, гинжгүй) leaf-ийн өөрийн AKI-д
+    /// буцдаг — тэр нь хариуны гэрчилгээнд бичигдсэн утга тул AllowUntrusted үед аюулгүйн хамгаалалт БИШ (dev/тест л).
     /// </summary>
     public IReadOnlyList<string>? AllowedIssuerSkis { get; init; }
 
@@ -220,8 +227,8 @@ public sealed record Signer
 public sealed class ResponseValidator
 {
     private const string EkuAny = "2.5.29.37.0";
-    private const string EkuClientAuth = "1.3.6.1.5.5.7.3.2";
-    private const string EkuEmailProtection = "1.3.6.1.5.5.7.3.4";
+    internal const string EkuClientAuth = "1.3.6.1.5.5.7.3.2";
+    internal const string EkuEmailProtection = "1.3.6.1.5.5.7.3.4";
     private const string OidQcCompliance = "0.4.0.1862.1.1";
     private const string OidQcSscd = "0.4.0.1862.1.4";
     /// <summary>Монголын үндэсний PKI-ийн certificate policy (CA crypto/ca_policy.go NationalPolicyOID).</summary>
@@ -265,10 +272,17 @@ public sealed class ResponseValidator
     /// <summary>PEM-үүдийг задалж validator үүсгэнэ (Go <c>NewValidator</c>).</summary>
     /// <param name="trust">Итгэлийн тохиргоо; null = хоосон (anchor-гүй — fail-closed).</param>
     /// <param name="timeProvider">Цаг (гэрчилгээний хугацааны шалгалт); null = <see cref="TimeProvider.System"/>.</param>
-    /// <exception cref="ArgumentException">PEM задарсангүй эсвэл AllowedIssuerSkis hex биш.</exception>
+    /// <exception cref="ArgumentException">
+    /// PEM задарсангүй, trust pool-д сул RSA түлхүүр (&lt; 2048 бит / буруу exponent), AllowedIssuerSkis hex биш, эсвэл
+    /// RequiredLevel үл мэдэх.
+    /// </exception>
     public ResponseValidator(TrustConfig? trust = null, TimeProvider? timeProvider = null)
     {
         var t = trust ?? new TrustConfig();
+        if (!string.IsNullOrEmpty(t.RequiredLevel) && !LevelRank.ContainsKey(t.RequiredLevel))
+        {
+            throw new ArgumentException("eid: RequiredLevel: \"" + t.RequiredLevel + "\" нь ADVANCED / QUALIFIED / QSCD биш", nameof(trust));
+        }
         _anchors = ParsePems(t.TrustAnchorsPem ?? Array.Empty<string>(), nameof(TrustConfig.TrustAnchorsPem));
         _intermediates = t.IntermediatesPem is null
             ? EidTrust.CitizenIntermediates
@@ -312,6 +326,10 @@ public sealed class ResponseValidator
             {
                 throw new ArgumentException("eid: " + field + ": " + e.Message, field, e);
             }
+        }
+        if (list.Any(c => c.WeakKey))
+        {
+            throw new ArgumentException("eid: " + field + ": RSA түлхүүр сул (< " + ParsedCert.MinRsaBits + " бит эсвэл буруу exponent)", field);
         }
         return list;
     }
@@ -703,6 +721,11 @@ public sealed class ResponseValidator
             throw Invalid(ValidationReasons.CertMalformed, "гэрчилгээ base64 буруу");
         }
         var leaf = ParseOrInvalid(der);
+        if (leaf.WeakKey)
+        {
+            throw Invalid(ValidationReasons.CertWeakKey,
+                "гэрчилгээний RSA түлхүүр сул (" + leaf.RsaBits + " бит < " + ParsedCert.MinRsaBits + " эсвэл буруу exponent; serial " + leaf.SerialHex() + ")");
+        }
         var now = _clock.GetUtcNow();
         CheckValidity(leaf, now);
         VerifyCertificate(leaf, protocol, now);
@@ -725,7 +748,10 @@ public sealed class ResponseValidator
         }
     }
 
-    /// <summary>Зориулалт, trust anchor, гинж, issuer (Go <c>verifyCertificate</c>; allowUntrusted үед issuer-ийг TS шиг шалгасаар).</summary>
+    /// <summary>
+    /// Зориулалт, trust anchor, гинж, issuer (Go <c>verifyCertificate</c>). AllowUntrusted (anchor-гүй) үед гинж алга тул
+    /// <see cref="CheckIssuer"/> leaf-ийн өөрийн AKI-д буцна (TS-ийн зан) — энэ нь хамгаалалт биш, зөвхөн dev/тест.
+    /// </summary>
     private void VerifyCertificate(ParsedCert leaf, string protocol, DateTimeOffset now)
     {
         CheckPurpose(leaf, protocol);
@@ -962,6 +988,10 @@ public sealed class ResponseValidator
             {
                 case KeyKind.Rsa:
                     {
+                        if (leaf.WeakKey)
+                        {
+                            return false;
+                        }
                         using var rsa = leaf.CreateRsa();
                         if (sig.Length != (rsa.KeySize + 7) / 8)
                         {
@@ -999,7 +1029,7 @@ public sealed class ResponseValidator
 
     // ── гинж (TS validator.ts verifyChain / caReason / criticalReason / ekuReason-ийн порт) ──
 
-    private readonly record struct Fail(string Key, string Text);
+    internal readonly record struct Fail(string Key, string Text);
 
     /// <summary>
     /// RFC 5280 замын шалгалт, SDK-ийн өөрийн угсралт (TS validator.ts <c>verifyChain</c>): leaf-ээс trust anchor хүртэлх
@@ -1009,7 +1039,7 @@ public sealed class ResponseValidator
     /// хүрээнд). Хүчинтэй зам олдвол амжина; үгүй бол эхэлж тааралдсан CA-ийн шалтгаан, тэр нь ч алга бол chain.untrusted.
     /// certificatePolicies шалгахгүй.
     /// </summary>
-    private void VerifyChain(ParsedCert leaf, string usage, DateTimeOffset at)
+    internal void VerifyChain(ParsedCert leaf, string usage, DateTimeOffset at)
     {
         var now = at < leaf.NotBefore ? leaf.NotBefore : at > leaf.NotAfter ? leaf.NotAfter : at;
         if ((CriticalFail(leaf) ?? EkuFail(leaf, usage)) is { } lf)
@@ -1056,7 +1086,7 @@ public sealed class ResponseValidator
     }
 
     /// <summary>child-ийг cand гаргасан эсэх: issuer нэр = subject (байт), AKI/SKI (хоёулаа байвал) таарах, гарын үсэг.</summary>
-    private static bool SignedBy(ParsedCert child, ParsedCert cand)
+    internal static bool SignedBy(ParsedCert child, ParsedCert cand)
     {
         if (!child.RawIssuer.AsSpan().SequenceEqual(cand.RawSubject))
         {
@@ -1070,7 +1100,7 @@ public sealed class ResponseValidator
     }
 
     /// <summary>Issuer CA-ийн шалгалт (TS <c>caReason</c>-ийн дараалал); below = энэ CA-аас доорх завсрын CA-ийн тоо.</summary>
-    private static Fail? CaFail(ParsedCert ca, int below, DateTimeOffset now, string usage)
+    internal static Fail? CaFail(ParsedCert ca, int below, DateTimeOffset now, string usage)
     {
         if (!ca.IsCa)
         {

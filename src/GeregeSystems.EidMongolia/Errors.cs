@@ -468,6 +468,11 @@ public static class ValidationReasons
     public const string NoDocumentNumber = "response.no_document_number";
     /// <summary>Гэрчилгээ base64 DER X.509 биш.</summary>
     public const string CertMalformed = "cert.malformed";
+    /// <summary>
+    /// .NET-ийн нэмэлт түлхүүр (корпуст алга): гэрчилгээний RSA түлхүүр сул — modulus &lt; 2048 бит, эсвэл public
+    /// exponent тэгш / &lt; 3. <see cref="CertMalformed"/>-ийн дараа шалгана.
+    /// </summary>
+    public const string CertWeakKey = "cert.weak_key";
     /// <summary>Гэрчилгээ хүчинтэй болоогүй (now + skew &lt; notBefore).</summary>
     public const string CertNotYetValid = "cert.not_yet_valid";
     /// <summary>Гэрчилгээний хугацаа дууссан (now − skew &gt; notAfter).</summary>
