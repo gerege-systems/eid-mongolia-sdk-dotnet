@@ -2,6 +2,126 @@
 
 Бүх өөрчлөлт `changelog.d/`-ээр орж, release бүрд энд нэгтгэгдэнэ.
 
+## 0.17.0 — 2026-11-26
+
+**Гол өөрчлөлт:** гурван багц нэг хувилбартай (lockstep) гарна. Шинэ **`GeregeSystems.EidMongolia`** — TypeScript ба Go
+SDK-тэй ижил хүрээтэй бүрэн server-side RP SDK (Auth, Sign, Session, Validator, OCSP, PDF бүртгэл, байгууллага, иргэн,
+e-Seal, USB токен, share, «Миний QR», «eID-ээр нэвтрэх» товчны backend). Шинэ **`GeregeSystems.EidMongolia.AspNetCore`** —
+`AddEidMongolia` / `MapEidLogin`. **`GeregeSystems.EidMongolia.Pades`** одоо core-оос хамаарна: «Миний QR»-ийн 12 нийтийн
+төрөл (`GeregeSystems.EidMongolia.Qr`) core руу шилжиж `[TypeForwardedTo]`-оор дамжуулагдана — 0.16.0-ийн эсрэг compile
+хийсэн код дахин compile-гүйгээр ажиллана (нэр, namespace, гишүүд ижил). PAdES-ийн гаралт байт-ижил (golden өөрчлөгдөөгүй).
+
+*English:* three packages now ship in lockstep. New **`GeregeSystems.EidMongolia`** is a full server-side relying-party SDK
+with the same scope as the TypeScript and Go SDKs; new **`GeregeSystems.EidMongolia.AspNetCore`** adds `AddEidMongolia` /
+`MapEidLogin`. **`GeregeSystems.EidMongolia.Pades`** now depends on the core package: the twelve public «My QR» types
+(`GeregeSystems.EidMongolia.Qr`) moved to core and are type-forwarded, so code compiled against Pades 0.16.0 keeps working
+without recompiling. PAdES output is byte-identical (golden vectors unchanged). Revocation in the login backend defaults to
+soft-fail — set `RevocationMode.HardFail` for high-value relying parties.
+
+### Security
+
+- **RSA ≥ 2048 бит, exponent сондгой ба ≥ 3** — иргэний (leaf), CA, OCSP responder/issuer-ийн түлхүүрт (validator, «Миний
+  QR», токены нэвтрэлт); сул leaf → `cert.weak_key`, сул trust pool → `ArgumentException`.
+- **Гинжийн хатуу дүрэм (fail-closed, X509Chain-гүй, платформ бүрд ижил):** өөрийн DER замын угсралт (TS `verifyChain`-ийн
+  порт) — basicConstraints/pathLen, keyCertSign, EKU давхарга, хугацаа, issuer SKI allowlist; name constraints-тэй CA (anchor
+  ч мөн) ба танихгүй critical extension-ийг татгалзана; AIA татахгүй. «Миний QR» ч мөн энэ замаар (өмнө нь Pades-д X509Chain).
+- **«Миний QR»-ийн OCSP `unknown` → revoked** (`QR_CERT_REVOKED`; олгогч энэ serial-ийг олгоогүй) ба хариуны шинэлэг байдал
+  Go/TS-ийн 48 ц-ийн дүрэм (thisUpdate ∈ [now − 48 ц, now + 5 мин], nextUpdate өнгөрөөгүй). PAdES LTV-ийн 24 ц-ийн дүрэм хэвээр.
+- **Issuer / CertID-ийн холбоос:** `OcspRevocationChecker` сүлжээнээс ӨМНӨ leaf-ийг өгсөн issuer гаргасныг шалгана (үгүй бол
+  `no_issuer`), хариуны CertID-ийн issuerNameHash / issuerKeyHash-ийг тулгана (зөрвөл `invalid`).
+- **Давхардсан subject-ийг татгалзана:** SERIALNUMBER эсвэл CN нь давхардсан гэрчилгээ → `subject.duplicate_identity`
+  (validator, токены нэвтрэлт; «Миний QR»-д `QR_CHAIN_INVALID`).
+- **Бие даасан review-ийн засварууд (#49):** login `POST start`-ийн ганц surrogate-тэй JSON → 400 `invalid_body` (өмнө нь
+  хязгаараас өмнө 500); «Миний QR»-ийн header/payload/data-ийн мөр, түлхүүрийг аюулгүй уншина (`InvalidOperationException`
+  биш `EidQrException`), payload-ийн давхардсан түлхүүр → `QR_JWS_MALFORMED` (Go `jsonObject`); ASP.NET `MapEidLogin`-ийн
+  `ClientIp` анхдагч `EidLoginClientIp.RemoteAddress`, IPv6 клиентийн `start:` хязгаарын түлхүүр /64 угтвар; замын
+  параметрт хоосон / `.` / `..` → `ArgumentException` (System.Uri dot-segment-ээр өөр зам руу шилжихгүй); `VerifyAsync`
+  олгогчийн гэрчилгээг Dispose хийнэ.
+- **Анхдагч цуцлалтын горимууд (тодорхой хэлэв):** login backend — `OcspRevocationChecker`, **soft-fail** (OCSP хариугүй
+  бол иргэн нэвтэрнэ, `Revocation = Unchecked` + Warning); өндөр үнэ цэнтэй RP-д `RevocationMode = HardFail`. `Validator` —
+  `TrustConfig.Revocation` өгөөгүй бол цуцлалт шалгахгүй (`Skipped`), өгвөл анхдагч hard-fail. «Миний QR» — AIA-ийн OCSP,
+  hard-fail.
+
+### Added — `GeregeSystems.EidMongolia` (RP SDK цөм, шинэ багц)
+
+- **Client:** `EidClient` + `EidClientOptions` / `EidCredentials` — BaseUrl-ийн дүрэм (https; http зөвхөн loopback; хуучин
+  `ca.eidmongolia.mn`-д тодорхой алдаа), Bearer, timeout 15 с / PDF 80 с, `Accept-Language`, JSON 4 MiB, mTLS дуудагчийн
+  `HttpClient`-ээр, `TimeProvider`; `EidException`-ийн шатлал (`Code`, `Status`, `RetryAfter`, `Retryable`; CA-ийн код бүрийн
+  дэд анги); Go `routes.go`-той ижил замын хүснэгт; discovery `client.Auth.SessionTtlAsync()`.
+- **Auth / Sign / Session / PDF:** `client.Auth` (push — ETSI / document, device link — anonymous / ETSI; `AuthOptions`,
+  `AcspContext`); `client.Sign` (digest, text, linked, device link, certificate-choice; `SignOptions`, `SignerRef`);
+  `client.Session.PollAsync` / `WaitForResultAsync` (MaxWait → expiresAt → discovery sessionTtl → 600 с, + 15 с grace),
+  `ParseSessionResult`, `EnsureCompleteOk`; `client.Pdf.RegisterSignatureAsync` (`POST /pdf/signatures`, PRIOR_MISMATCH-ийн
+  давталт, `PdfErrorCodes`); `DeviceLinkSession.BuildLink` / `TickQrAsync`; крипто туслахууд (`Acsp`, `EidCrypto`,
+  `DeviceLink` — authCode = HMAC-SHA256).
+- **Validator:** `client.Validator` (`ResponseValidator`) — `ValidateAuth` (ACSP_V2, flowType relay хаалт,
+  userChallengeVerifier, callback, алгоритм/hash downgrade хаалт), `ValidateSign` (RAW_DIGEST: RSA-PSS, PKCS#1 v1.5, ECDSA
+  P-256), `ValidateCertificateChoice`, `CheckRevocationAsync` / `CheckRevocationWithAsync` (hard/soft-fail),
+  `CertificateLevelOf`, `ParseSubject`; `TrustConfig`, `EidTrust` (шигтгэсэн 01–04); `OcspRevocationChecker` (Go `ocsp.go`:
+  delegated responder, 2 с / нийт 3 с, 16 KiB, «good»-ийг кэшлэнэ); `EidValidationException.Reason` = тогтвортой түлхүүр
+  (`ValidationReasons`).
+- **Үйлчилгээ:** `client.Organization` (төлөөлөл, тамганы эрх), `client.Person` (PKI_READ: гэрчилгээ, төхөөрөмж, үйл
+  ажиллагаа, хураангуй, хүүхдүүд), `client.Seal` (тамганы гэрчилгээ, хүсэлт, `SealAsync` — хариуны ECDSA ба e-Seal профайл,
+  тамганы эрхийн хүсэлт), `client.Token` (USB токены гэрчилгээ, preview, үр дүн, `VerifyTokenCertificates`, токены нэвтрэлт
+  — CA руу илгээхээс өмнө rpUUID, digest, гарын үсэг, гинжийг шалгана), `client.ShareAsync` / `ShareInfoAsync`, `client.Qr`
+  («Миний QR» — `EidClientOptions.QrTrust`).
+- **Conformance:** Go `testdata/conformance` (rp-conformance/1)-ийн байт-ижил хуулбар (`build/sync-conformance.sh`, CI
+  `conformance-sync`): rp-validate 77, OCSP 17, wire 26, interactions, acsp_v2, eidlogin 24 сценари; CA-ийн device-link
+  golden; `contract.yml` замын хүснэгтийг live `/.well-known/eid`-тэй өдөр бүр тулгана.
+
+### Added — «eID-ээр нэвтрэх» товчны backend ба `GeregeSystems.EidMongolia.AspNetCore` (шинэ багц)
+
+- **Юу:** `GeregeSystems.EidMongolia.Login.EidLoginHandler` (Go `eidlogin.Handler`, TS `createEidLogin`-ийн порт;
+  framework-аас хамааралгүй): `POST start` (qr | push), `GET start?mode=web2app`, `GET status`, `GET callback` (Web2App);
+  HttpOnly + Secure + SameSite=Lax cookie binding; `IEidLoginStore` + `MemoryEidLoginStore`; хязгаар (`EidLoginRateRule`:
+  start 20/мин IP, push 3/мин дугаар); `EidLoginClientIp.RemoteAddress` / `Forwarded(n)`; decoy push ба 1 с push floor;
+  ValidateAuth + OCSP (soft-fail анхдагч) дараа нэг удаа `OnSuccess`; `OnEvent` аудит (HMAC pushKey); 12 алдааны код Go/TS-тэй
+  ижил. `GeregeSystems.EidMongolia.AspNetCore`: `services.AddEidMongolia(...)`, `app.MapEidLogin("/auth/eid", ...)`,
+  `EidLoginHttp` (shared framework-аас өөр хамааралгүй).
+- **Go/TS-ээс ялгаа:** `OnEvent`-ийн алдааг залгиж Log руу (TS); `data` нь camelCase JSON; JSON бие хатуу задлагдана;
+  failure redirect-ийн query дараалал хадгалагдана.
+
+### Changed — `GeregeSystems.EidMongolia.Pades` core-оос хамаарна; «Миний QR» core-д (type forwarding)
+
+- **Юу:** Pades-д core руу хамаарал (`GeregeSystems.EidMongolia` 0.17.0); Pades-ийн «Миний QR»-ийн хуулбар устсан,
+  `Properties/TypeForwards.cs` нь `EidQr`, `EidQrClient`, `EidQrOptions`, `EidQrException`, `EidQrErrorCodes`, `QrStartRequest`,
+  `QrSession`, `QrSigner`, `QrResult`, `QrExpect`, `QrTrust`, `QrCheck`-ийг core руу дамжуулна. 0.16.0-ийн нийтийн гишүүдтэй
+  гишүүн бүрээр ижил (v0.16.0 tag-тай тулгасан).
+- **Зан төлөвийн ялгаа (API биш):** «Миний QR»-ийн гинж core-ийн замын угсралтаар (дээрх «Security»); `QrTrust.Intermediates`
+  null бол шигтгэсэн 02–04 (өмнө нь 02–05 — 05 нь байгууллагын олгогч, иргэний гэрчилгээнд хэрэггүй; анхдагч олгогч 04 хэвээр);
+  review-ийн засварууд (давхардсан payload түлхүүр, ганц surrogate).
+- **Нэгтгээгүй (тайлбар):** Pades-ийн дотоод `Crypto/Ocsp.cs`, `Der`, `X509Util`, `Fetcher`, `Trust` core-ийнхтэй ижил зан
+  төлөвтэй БИШ (PAdES LTV — Go `x/crypto/ocsp`-ийн `ParseResponseForCert`, SHA-1 responder-ийг зөвшөөрнө, 24 ц, CRL толин
+  хуулбар; `Der` нь CMS-ийн байт-ижил бичигч; core-д зөвхөн RP-ийн хатуу уншигч) — нэгтгэвэл golden-ийн байт эсвэл LTV-ийн
+  дүрэм өөрчлөгдөнө, тиймээс хэвээр үлдээв.
+- **Багц:** гурван багц ижил metadata (Gerege Systems LLC, MIT, README, repository, SourceLink, `.snupkg` symbols), `net8.0`
+  ба `net10.0`.
+
+### Changed — README гурван хэлээр
+
+- `README.md` (монгол), `README.en.md`, `README.zh-CN.md` — RP SDK-ийн бүрэн баримт (суулгах, client, auth push/QR, session,
+  validator ба цуцлалтын горимууд, sign, PDF бүртгэл, тамга/байгууллага/иргэн/токен/share, «Миний QR», login backend +
+  ASP.NET Core, proxy-ийн ард client IP), Pades хэрэглэгчдэд шилжих тэмдэглэл, Go/TS-тэй харьцуулсан дэмжлэгийн хүснэгт;
+  кодын жишээний коммент тус бүрийн хэлээр.
+
+### CI ба release
+
+- `pack` нь гурван багцыг (+ `.snupkg`) гаргаж `build/check-packages.sh`-ээр шалгана (хувилбар, metadata, TFM бүрийн lib,
+  Pades/AspNetCore → core 0.17.0 хамаарал, AspNetCore → `Microsoft.AspNetCore.App`).
+- Шинэ `compat` job: Pades 0.16.0-ийн (nuget.org) эсрэг compile хийсэн «Миний QR» хэрэглэгч 0.17.0-ийн dll дээр дахин
+  compile-гүйгээр ажиллана (12 төрөл core-оос ачаалагдана), мөн энэ репогийн эсрэг source-оор compile болно.
+- `release.yml`: `v*` tag → CI → GitHub Release (nupkg + snupkg) → GitHub Packages → nuget.org; core эхэлж, дараа нь
+  AspNetCore, Pades. Шинэ хоёр package ID-ийн nuget.org-ийн урьдчилсан нөхцөл — `docs/release-0.17.0.md`.
+
+### Дараагийн ажил (cross-SDK, эхлээд corpus / Go / TS өөрчлөлт)
+
+- Login cookie-д `__Host-` угтвар ба давхардсан login cookie-г татгалзах (review S3).
+- Rate-limit түлхүүрт иргэний дугаарыг hash болгох (review S4).
+- Validator-ийн issuer allowlist шууд issuer олдоогүй үед leaf-ийн AKI-д буцдаг дүрэм (Go/TS-тэй хамт).
+- Энэ SDK-д хараахан байхгүй: `ValidatePDF` (PDF-ийн бүрэн шалгагч); байгууллагын тамганы бүртгэл (`POST
+  /seal/{org}/registrations` — Go/TS-д ч хараахан алга); QR-тэй тамганы дардас (APPEARANCE_SPEC §6.5–6.6, Go v0.31.0 golden
+  v13 — энэ SDK golden v12 дээр: QR-тэй тамгатай, verify хуудасгүй баримтад `Prepare` docId-г тамганаас авахгүй).
+
 ## 0.16.0 — 2026-11-24
 
 **Гол өөрчлөлт:** `SealAsync` одоо анхдагчаар **харагдах байгууллагын тамганы дардас** зурна; `SealOptions.Invisible = true`
