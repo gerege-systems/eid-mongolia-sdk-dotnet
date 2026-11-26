@@ -123,11 +123,21 @@ public class SealRegisterTests
     {
         var status = new Dictionary<string, int>
         {
-            [PdfErrorCodes.RequestTooLarge] = 413, [EidErrorCodes.RequestInvalid] = 400, [EidErrorCodes.RateLimited] = 429,
-            [EidErrorCodes.StateUnavailable] = 503, [PdfErrorCodes.CmsInvalid] = 400, [PdfErrorCodes.SignerMismatch] = 409,
-            [PdfErrorCodes.SignerCertInvalid] = 409, [PdfErrorCodes.SignatureInvalid] = 400, [EidErrorCodes.SealNotFound] = 409,
-            [EidErrorCodes.SealDocMismatch] = 409, [PdfErrorCodes.TimestampInvalid] = 400, [EidErrorCodes.DocIdReserved] = 409,
-            [PdfErrorCodes.DocIdConflict] = 409, [PdfErrorCodes.PriorMismatch] = 409, [PdfErrorCodes.RegistryConflict] = 409,
+            [PdfErrorCodes.RequestTooLarge] = 413,
+            [EidErrorCodes.RequestInvalid] = 400,
+            [EidErrorCodes.RateLimited] = 429,
+            [EidErrorCodes.StateUnavailable] = 503,
+            [PdfErrorCodes.CmsInvalid] = 400,
+            [PdfErrorCodes.SignerMismatch] = 409,
+            [PdfErrorCodes.SignerCertInvalid] = 409,
+            [PdfErrorCodes.SignatureInvalid] = 400,
+            [EidErrorCodes.SealNotFound] = 409,
+            [EidErrorCodes.SealDocMismatch] = 409,
+            [PdfErrorCodes.TimestampInvalid] = 400,
+            [EidErrorCodes.DocIdReserved] = 409,
+            [PdfErrorCodes.DocIdConflict] = 409,
+            [PdfErrorCodes.PriorMismatch] = 409,
+            [PdfErrorCodes.RegistryConflict] = 409,
         };
         Assert.Equal(status.Count, SealRegisterErrorCodes.All.Count);
         foreach (var code in SealRegisterErrorCodes.All)

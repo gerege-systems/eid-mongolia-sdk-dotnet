@@ -317,8 +317,11 @@ public class ContractTests
         var want = rest[(i + 1)..j].Split(',').Select(f => f.Trim().TrimEnd('?')).OrderBy(x => x, StringComparer.Ordinal);
         Assert.Equal(want, PdfTests.JsonNames(typeof(SealRegistration)).OrderBy(x => x, StringComparer.Ordinal));
         Assert.Contains("{docId, revIndex}", seal.GetProperty("seal").GetString() ?? "", StringComparison.Ordinal);
-        Assert.True(d.TryGetProperty("seal", out var sb) && sb.TryGetProperty("registerErrorCodes", out var codes),
-            "seal.registerErrorCodes discovery-д алга");
+        if (!d.TryGetProperty("seal", out var sb) || !sb.TryGetProperty("registerErrorCodes", out var codes))
+        {
+            Assert.Fail("seal.registerErrorCodes discovery-д алга");
+            return;
+        }
         var ca = codes.EnumerateArray().Select(x => x.GetString()!).Distinct().OrderBy(x => x, StringComparer.Ordinal);
         Assert.Equal(ca, SealRegisterErrorCodes.All.Distinct().OrderBy(x => x, StringComparer.Ordinal));
     }
