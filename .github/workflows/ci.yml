@@ -87,6 +87,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./build/sync-conformance.sh --check
 
+  validate-sync:
+    # testdata/pades-validate нь build/go-sdk-validate.ref дээрх eid-mongolia-sdk-go pades/testdata/validate (+ manifest-ийн
+    # заасан golden файлууд, pki/*.key.pem-гүй)-тэй байт-ижил; бүх тохиолдлыг ValidatePdfCorpusTests (test job) ажиллуулна.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build/sync-validate.sh --check
+
   changelog:
     # PR бүрд changelog.d/ фрагмент; CHANGELOG.md-г зөвхөн release/* салбар засна (анхны үүсгэлтээс бусад).
     if: github.event_name == 'pull_request'

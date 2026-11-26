@@ -13,6 +13,9 @@ internal readonly record struct XrefEntry(ObjPtr Ptr, bool InStream, ObjPtr Stre
 /// </summary>
 internal sealed class PdfDocument
 {
+    /// <summary>Нэг FlateDecode stream-ийн тайлсан хэмжээний дээд хязгаар (TS reader zlibInflate-тэй ижил).</summary>
+    internal const int MaxInflate = 64 << 20;
+
     private readonly byte[] _f;
     private readonly Dictionary<ObjPtr, object?> _cache = new();
     private readonly Dictionary<ObjPtr, byte[]> _streamData = new();
@@ -359,7 +362,14 @@ internal sealed class PdfDocument
         {
             using var zs = new ZLibStream(new MemoryStream(data), CompressionMode.Decompress);
             using var ms = new MemoryStream();
-            zs.CopyTo(ms);
+            // TS reader zlibInflate-ийн 64 MiB хязгаар: халдагчийн PDF-ийн (жишээ нь xref stream) zip bomb санах ойг дүүргэхгүй.
+            var buf = new byte[64 << 10];
+            int n;
+            while ((n = zs.Read(buf, 0, buf.Length)) > 0)
+            {
+                ms.Write(buf, 0, n);
+                if (ms.Length > MaxInflate) throw new PdfFormatException("zlib: output over limit");
+            }
             inflated = ms.ToArray();
         }
         catch (InvalidDataException e)

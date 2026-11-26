@@ -82,10 +82,15 @@ internal static class SignatureAppearance
     private sealed record Line(int Font, int Size, string Color, string Text);
 
     /// <summary>Form XObject-ийн content stream (APPEARANCE_SPEC.md §3).</summary>
-    public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld)
+    /// <remarks>
+    /// sealQr — QR-тэй тамганы дардас (APPEARANCE_SPEC.md §6.5: иргэний дардасны бүтэц, тамганы шошго, үүргийн мөргүй); одоогоор
+    /// зөвхөн ValidatePdf дахин үүсгэж тулгахад (бичигч §6.2-ийг л гаргана).
+    /// </remarks>
+    public static byte[] Content(AppearanceParams p, PageFont reg, PageFont bld, bool sealQr = false)
     {
-        if (p.Seal) return SealContent(p, reg, bld);
-        if (!Labels.TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
+        if (p.Seal && !sealQr) return SealContent(p, reg, bld);
+        if (p.Seal) p = p with { Role = "" };
+        if (!(p.Seal ? SealLabels : Labels).TryGetValue(p.Lang, out var label)) throw new AppearanceException("хэл " + p.Lang);
         if (!VerifyPage.AsciiUrl(p.Url)) throw new AppearanceException("URL ASCII биш");
         if (p.W <= 0 || p.H <= 0 || p.W > MaxSide || p.H > MaxSide) throw new AppearanceException("хэмжээ");
         bool[][] m;
@@ -206,12 +211,12 @@ internal static class SignatureAppearance
     }
 
     /// <summary>/AP /N form XObject ба түүний 2 фонт (11 объект): ids = [form, F1 ×5, F2 ×5]. Буцаах нь объектын бие.</summary>
-    public static byte[][] Objects(AppearanceParams p, uint[] ids)
+    public static byte[][] Objects(AppearanceParams p, uint[] ids, bool sealQr = false)
     {
         var reg = PageFont.Regular.Value;
         var bld = PageFont.Bold.Value;
         var (_, bw, bh) = Rotation(p.Rotate, p.W, p.H);
-        var content = Content(p, reg, bld);
+        var content = Content(p, reg, bld, sealQr);
         var o = new List<byte[]>(ids.Length)
         {
             VerifyPage.StreamObj(" /Type /XObject /Subtype /Form /BBox [0 0 " + Num100(bw) + " " + Num100(bh) + "] /Resources << /Font << /F1 " +
