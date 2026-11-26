@@ -46,14 +46,21 @@ public sealed class EidClientOptions
     /// null = <see cref="System.TimeProvider.System"/>; тестэд хянах боломжтой цаг өгнө.
     /// </summary>
     public TimeProvider? TimeProvider { get; init; }
+
+    /// <summary>
+    /// <see cref="EidClient.Validator"/>-ийн итгэлийн тохиргоо. Production-д
+    /// <c>TrustAnchorsPem = new[] { EidTrust.NationalRootCaPem }</c> ЗААВАЛ — null / anchor-гүй бол validator fail-closed
+    /// (<see cref="ValidationReasons.TrustNoAnchor"/>).
+    /// </summary>
+    public TrustConfig? Trust { get; init; }
 }
 
 /// <summary>
 /// eID Mongolia RP-API client (Go <c>eid.Client</c>, TS <c>EidClient</c>-ийн .NET порт — хөгжүүлэлт явагдаж байна).
 /// Одоогоор: тохиргоо, HTTP давхарга, алдаа, <see cref="Auth"/> (push / device link + discovery), <see cref="Sign"/>
 /// (digest / text / linked / device link / certificate-choice), <see cref="Session"/> (poll / wait), <see cref="Pdf"/>
-/// (<c>POST /pdf/signatures</c>). Validator дараагийн хувилбарт. mTLS: client certificate-тэй <see cref="HttpClient"/>-ийг
-/// конструкторт өгнө. Thread-safe.
+/// (<c>POST /pdf/signatures</c>), <see cref="Validator"/> (хариуны криптограф баталгаажуулалт, цуцлалт). mTLS: client
+/// certificate-тэй <see cref="HttpClient"/>-ийг конструкторт өгнө. Thread-safe.
 /// </summary>
 public sealed class EidClient : IDisposable
 {
@@ -85,7 +92,7 @@ public sealed class EidClient : IDisposable
     /// хугацааг тавьдаг тул <see cref="HttpClient.Timeout"/>-ийг <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>
     /// эсвэл <see cref="DefaultPdfTimeout"/>-оос их болго. null = шинэ client (redirect дагахгүй; <see cref="Dispose"/>-д хаагдана).
     /// </param>
-    /// <exception cref="ArgumentException">ApiSecret хоосон, эсвэл BaseUrl буруу.</exception>
+    /// <exception cref="ArgumentException">ApiSecret хоосон, BaseUrl буруу, эсвэл Trust-ийн PEM / SKI буруу.</exception>
     public EidClient(EidClientOptions options, HttpClient? httpClient = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -96,6 +103,8 @@ public sealed class EidClient : IDisposable
         }
         BaseUrl = ResolveBaseUrl(options.BaseUrl);
         Options = options;
+        // Trust-ийн PEM / SKI буруу бол HttpClient үүсгэхээс өмнө ArgumentException.
+        Validator = new ResponseValidator(options.Trust, options.TimeProvider ?? TimeProvider.System);
         if (httpClient is null)
         {
             _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
@@ -149,6 +158,14 @@ public sealed class EidClient : IDisposable
 
     /// <summary>Клиент талын PAdES гарын үсгийн бүртгэл (<c>POST /pdf/signatures</c>).</summary>
     public PdfService Pdf { get; }
+
+    /// <summary>
+    /// Session хариуны криптограф баталгаажуулалт (<see cref="ResponseValidator.ValidateAuth"/>,
+    /// <see cref="ResponseValidator.ValidateSign"/>, <see cref="ResponseValidator.ValidateCertificateChoice"/>) ба цуцлалт
+    /// (<see cref="ResponseValidator.CheckRevocationAsync"/>); <see cref="EidClientOptions.Trust"/> ба
+    /// <see cref="EidClientOptions.TimeProvider"/>-оор.
+    /// </summary>
+    public ResponseValidator Validator { get; }
 
     internal EidHttp Http { get; }
 

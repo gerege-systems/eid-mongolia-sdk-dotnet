@@ -134,11 +134,11 @@ public sealed class SessionService
     {
         if (result is null)
         {
-            throw new EidValidationException("хариу алга");
+            throw new EidValidationException(ValidationReasons.ResponseMissing, "хариу алга");
         }
         if (result.State != SessionStates.Complete)
         {
-            throw new EidValidationException("session дуусаагүй (state=" + result.State + ")");
+            throw new EidValidationException(ValidationReasons.SessionNotComplete, "session дуусаагүй (state=" + result.State + ")");
         }
         if (result.EndResult != EndResults.Ok)
         {

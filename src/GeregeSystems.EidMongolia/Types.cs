@@ -68,6 +68,15 @@ public static class SessionStates
     public const string Complete = "COMPLETE";
 }
 
+/// <summary>Гарын үсгийн протокол (<c>signatureProtocol</c>).</summary>
+public static class SignatureProtocols
+{
+    /// <summary>Нэвтрэлт: ACSP_V2 payload дээрх гарын үсэг.</summary>
+    public const string AcspV2 = "ACSP_V2";
+    /// <summary>Гарын үсэг: RP-ийн digest дээрх (prehashed) гарын үсэг.</summary>
+    public const string RawDigestSignature = "RAW_DIGEST_SIGNATURE";
+}
+
 /// <summary>Session-ийн эцсийн үр дүнгийн түгээмэл утгууд (<c>result.endResult</c>).</summary>
 public static class EndResults
 {
