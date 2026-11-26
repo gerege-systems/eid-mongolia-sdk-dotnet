@@ -238,8 +238,7 @@ internal static class Extract
         if (dss is not null)
             foreach (var s in sigs) s.Dss = dss;
         // Зөвхөн бүрэн бүтэн (Integrity) гарын үсэг л «гарын үсгийн өргөтгөл» болно (Go extract.go extractWith): криптографаар
-        // таараагүй гарын үсэгтэй revision DSS-only горимд орж татгалзагдана. Name — own-signer-ийн харагдах дардасны /Name-тэй
-        // тулгах гэрчилгээний харуулах нэр (OwnAppearance).
+        // таараагүй гарын үсэгтэй revision DSS-only горимд орж татгалзагдана.
         var known = new Dictionary<int, long[]>();
         var metas = new Dictionary<int, SigMeta>();
         foreach (var s in sigs)
@@ -252,7 +251,6 @@ internal static class Extract
                 Role = "",
                 RoleOk = s.ClaimedRoles.Count <= 1,
                 Seal = ValCert.SealCertificateDer(s.Leaf),
-                Name = CertDisplayName(s.Leaf),
             };
         }
         foreach (var kv in metas)
@@ -276,20 +274,6 @@ internal static class Extract
             s.LaterVisible = later.Visible;
         }
         return (sigs, docId);
-    }
-
-    /// <summary>Go certDisplayName: DER гэрчилгээний харуулах нэр (GIVENNAME SURNAME, эс бөгөөс CN); задрахгүй бол "".</summary>
-    private static string CertDisplayName(byte[]? der)
-    {
-        if (der is null) return "";
-        try
-        {
-            return Evaluator.DisplayName(ValCert.Parse(der));
-        }
-        catch (ValCertException)
-        {
-            return "";
-        }
     }
 
     /// <summary>widget харагдах: /AP-тэй эсвэл /Rect-ийн өргөн, өндөр хоёулаа 0 биш.</summary>

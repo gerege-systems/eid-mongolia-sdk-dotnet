@@ -450,7 +450,7 @@ internal sealed class Evaluator
     }
 
     /// <summary>eidcrypto.SubjectDisplayName.</summary>
-    internal static string DisplayName(ValCert c)
+    private static string DisplayName(ValCert c)
     {
         var (given, surname) = GoFmt.SubjectNames(c.RawSubject);
         var n = GoTrim(given + " " + surname);

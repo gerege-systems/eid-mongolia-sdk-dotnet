@@ -24,13 +24,6 @@ internal sealed class SigMeta
 
     /// <summary>Гарын үсэг зурагчийн гэрчилгээ e-Seal (APPEARANCE_SPEC.md §6.1).</summary>
     public bool Seal;
-
-    /// <summary>
-    /// Гарын үсэг зурагчийн гэрчилгээний харуулах нэр (eidcrypto.SubjectDisplayName; задрахгүй бол ""). Дардасны /Name яг үүнтэй
-    /// тэнцүү байх ёстой (Go appearance.go sigMeta.name): эс бөгөөс хожмын гарын үсэг өөр хүний нэрээр дардас нэмж, өмнөх гарын
-    /// үсгүүд «зөвхөн гарын үсгээр өргөтгөгдсөн» хэвээр үлдэнэ.
-    /// </summary>
-    public string Name = "";
 }
 
 /// <summary>Гарын үсгийн мужийн дараах revision-уудын дүгнэлт.</summary>
