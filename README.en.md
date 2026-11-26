@@ -21,14 +21,13 @@ Full documentation: <https://developer.eidmongolia.mn/#overview>.
 |---|---|---|
 | `GeregeSystems.EidMongolia` | RP SDK: `EidClient` (Auth, Sign, Session, Validator, PDF registration, Organization, Person, Seal, Token, Share, «My QR»), `OcspRevocationChecker`, `EidLoginHandler` | — |
 | `GeregeSystems.EidMongolia.AspNetCore` | `services.AddEidMongolia(...)`, `app.MapEidLogin(...)` | core + the ASP.NET Core shared framework |
-| `GeregeSystems.EidMongolia.Pades` | Client-side PAdES: `EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration` | core + `System.Security.Cryptography.Pkcs` (Microsoft) |
+| `GeregeSystems.EidMongolia.Pades` | Client-side PAdES: `EidPades.Prepare` / `CompleteAsync` / `SealAsync` / `Registration`; PDF validation `ValidatePdfAsync` | core + `System.Security.Cryptography.Pkcs` (Microsoft) |
 
 - All three share one version (lockstep), `net8.0` and `net10.0` (multi-target). The `net8.0` runtime went out of support
   on 2026-11-10; it is kept temporarily so that current relying parties can still restore, and will be dropped in a
   coming release.
 - Thread-safe, no global state: use one `EidClient` (singleton) for all requests. The API secret stays on the backend.
-- A full PDF validator (`ValidatePDF`) is **not available yet** in this SDK — use Go `pades.ValidatePDF` or TS `validatePdf`
-  (see «Support compared with Go / TS»).
+- Full PDF validation — `EidPades.ValidatePdfAsync` (the same report as Go `pades.ValidatePDF` and TS `validatePdf`; see «Validating a PDF»).
 
 ## Install
 
@@ -509,6 +508,44 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 - For new RP work (authentication, signing sessions, registration) use core's `EidClient` — `client.Sign` / `client.Seal` /
   `client.Pdf` instead of the hand-written `HttpClient` examples in the «PAdES» section.
 
+## Validating a PDF (`EidPades.ValidatePdfAsync`)
+
+Full validation of a signed or sealed PDF — **the same rules and the same JSON report** as Go `pades.ValidatePDF`, TS
+`validatePdf` and the CA's `POST /v3/validate/pdf` (`PdfReport.ToJson()`; without the CA-registry fields `session_id` /
+`doc_id` / `on_behalf_of_*` / `stamp_lookup`). The document is never sent anywhere — online revocation sends only the
+certificate serial (an OCSP request).
+
+```csharp
+using GeregeSystems.EidMongolia.Pades;
+
+PdfReport rep = await EidPades.ValidatePdfAsync(pdfBytes, new ValidatePdfOptions
+{
+    // Roots / Intermediates / Issuers — default: the embedded National Root CA (01), 02–05, eID issuers 04/05.
+    // Time — validation time (default now); Offline = true — the document's DSS only; HttpClient — OCSP/CRL (tests/proxy).
+}, ct);
+if (rep.Indication != "valid") { /* rep.Signatures[i].Problems */ }
+string json = rep.ToJson();
+```
+
+- Checks: ByteRange (the gap is exactly this /Contents) and messageDigest, the CMS/CAdES signature (RSA PKCS#1, RSA-PSS,
+  ECDSA; RSA keys below 2048 bits are rejected), signing-certificate-v2, the chain (own path builder — not X509Chain, identical
+  on Windows and Linux; unknown critical extensions and CAs with name constraints are rejected), KU/EKU (`usage`), validity,
+  the RFC 3161 timestamp (TSA chain, timeStamping EKU), revocation, LTV coverage, `signature_level` (B/T/LT),
+  `certificate_level`, `key_medium`.
+- Changes after signing: every later revision is compared as a parsed object graph (the CA public validator's rules) — only
+  added signatures/DSS give `extended_by_signatures_only`; visible signatures and organisation seal stamps (with/without QR,
+  APPEARANCE_SPEC §5/§6) are regenerated with the writer's code and compared; anything else is `modified_after_signing`.
+- Revocation (certificates issued by eID 04/05): online — AIA OCSP, else CDP CRL (issuer signature, CertID); no answer or
+  `Offline` → the document's DSS OCSP/CRL; evidence must be fresh at the validation time (the PAdES LTV 24 h rule, separate
+  from the RP OCSP checker's 48 h rule). None → `revocation_unavailable` (indeterminate).
+- Errors (`EidPadesException.RawCode`): `PDF_TOO_LARGE` (> 10 MiB), `PDF_INVALID`, `PDF_ENCRYPTED` (/Encrypt — even with an
+  empty password), `PDF_NO_SIGNATURE`, `PDF_TOO_MANY_SIGNATURES` (> 16), `REQUEST_INVALID` (Roots/Intermediates/Issuers do not parse).
+- Limits on attacker-controlled PDFs: a structure check before parsing (nesting ≤ 256, ObjStm budget); the revision parser
+  has recursion ≤ 64, ≤ 1,000,000 nodes, inflate ≤ 64 MiB, ≤ 128 xref sections, object numbers < 2^23; every FlateDecode
+  stream ≤ 64 MiB; DSS streams ≤ 1 MiB (≤ 64 each); chain building ≤ 100 attempts; OCSP answers ≤ 16 KiB, HTTP ≤ 4 MiB, 10 s.
+- Conformance: `testdata/pades-validate` = Go v0.31.0 `pades/testdata/validate` (+ the golden files it references)
+  (`./build/sync-validate.sh`, CI `validate-sync`); every case's report is deep-equal to Go's (`ValidatePdfCorpusTests`).
+
 ## Support compared with Go / TS
 
 | Feature | .NET 0.17.0 | Go | TS |
@@ -526,8 +563,8 @@ File.WriteAllBytes("sealed.pdf", done.Pdf);
 | «My QR» | ✓ | ✓ | ✓ |
 | «Sign in with eID» backend | ✓ (+ ASP.NET Core) | ✓ (`net/http`) | ✓ (+ `<eid-login-button>`) |
 | PAdES prepare / complete / suggestPlacement / registration body | ✓ | ✓ | ✓ |
-| Full PDF validator (`ValidatePDF`) | — | ✓ | ✓ |
-| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator and `Prepare` docId) | — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
+| Full PDF validator (`ValidatePDF`) | ✓ `ValidatePdfAsync` (pades-validate/1) | ✓ | ✓ |
+| Seal stamp with QR (APPEARANCE_SPEC §6.5–6.6, golden v13: validator and `Prepare` docId) | validator ✓; `Prepare` — (golden v12) | ✓ v0.31.0 | ✓ 0.49.0 |
 | Seal registration (`POST /seal/{org}/registrations`) | — | — | — |
 | `pdfDigest`, browser entry, `convert` | — | — | ✓ (TS only) |
 

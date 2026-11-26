@@ -304,7 +304,13 @@ internal static class GoFmt
         var seq = Rdns(rawName);
         var f = new Dictionary<string, List<string>>(StringComparer.Ordinal)
         {
-            ["C"] = new(), ["ST"] = new(), ["L"] = new(), ["STREET"] = new(), ["POSTALCODE"] = new(), ["O"] = new(), ["OU"] = new(),
+            ["C"] = new(),
+            ["ST"] = new(),
+            ["L"] = new(),
+            ["STREET"] = new(),
+            ["POSTALCODE"] = new(),
+            ["O"] = new(),
+            ["OU"] = new(),
         };
         string cn = "", sn = "";
         var all = new List<Atv>();
