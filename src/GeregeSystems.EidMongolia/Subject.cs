@@ -87,6 +87,36 @@ public sealed record CertSubject
         };
     }
 
+    /// <summary>
+    /// DER Name-д SERIALNUMBER (2.5.4.5) эсвэл CN (2.5.4.3) нэгээс олон удаа байгаа эсэх (бүх RDN-ийн бүх atv; Name-ийг
+    /// <see cref="FromName"/> аль хэдийн шалгасан).
+    /// </summary>
+    internal static bool HasDuplicateIdentity(byte[] rawName)
+    {
+        var top = new AsnReader(rawName, AsnEncodingRules.DER);
+        var seq = top.ReadSequence();
+        int serials = 0, cns = 0;
+        while (seq.HasData)
+        {
+            var set = seq.ReadSetOf(skipSortOrderValidation: true);
+            while (set.HasData)
+            {
+                var atv = set.ReadSequence();
+                switch (atv.ReadObjectIdentifier())
+                {
+                    case "2.5.4.3":
+                        cns++;
+                        break;
+                    case "2.5.4.5":
+                        serials++;
+                        break;
+                }
+                atv.ReadEncodedValue();
+            }
+        }
+        return serials > 1 || cns > 1;
+    }
+
     /// <summary>Go x509 parseASN1String.</summary>
     private static string Decode(Asn1Tag tag, ReadOnlySpan<byte> v)
     {

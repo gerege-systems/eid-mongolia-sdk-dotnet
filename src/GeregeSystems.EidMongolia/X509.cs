@@ -119,6 +119,8 @@ internal sealed class ParsedCert
     /// <summary>AIA-ийн OCSP URI-ууд, дарааллаар (Go Certificate.OCSPServer).</summary>
     public IReadOnlyList<string> OcspServers { get; private set; } = Array.Empty<string>();
     public CertSubject Subject { get; private set; } = new();
+    /// <summary>Subject-д SERIALNUMBER (2.5.4.5) эсвэл CN (2.5.4.3) нэгээс олон удаа (validator татгалзана).</summary>
+    public bool DuplicateSubjectIdentity { get; private set; }
 
     public bool IsP256 => KeyKind == KeyKind.Ec && Curve == OidP256;
 
@@ -302,6 +304,7 @@ internal sealed class ParsedCert
             PublicKeyBits = keyBits,
             Extensions = exts,
             Subject = CertSubject.FromName(subject),
+            DuplicateSubjectIdentity = CertSubject.HasDuplicateIdentity(subject),
         };
         c.SetKey(keyAlg);
         foreach (var e in exts)

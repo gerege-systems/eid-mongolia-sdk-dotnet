@@ -464,6 +464,9 @@ public sealed record RepresentationsResponse
     /// <summary>Төлөөллүүд.</summary>
     [JsonPropertyName("representations")]
     public IReadOnlyList<Representation> Representations { get; init; } = Array.Empty<Representation>();
+    /// <summary>Серверийн түүхий JSON (SDK задлаагүй шинэ талбарт).</summary>
+    [JsonIgnore]
+    public JsonElement? Raw { get; init; }
 }
 
 /// <summary>Токены гэрчилгээ олголтын төлөв (<see cref="TokenCertSessionBlock.Status"/>).</summary>

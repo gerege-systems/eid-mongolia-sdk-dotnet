@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using GeregeSystems.EidMongolia.Qr;
 
 namespace GeregeSystems.EidMongolia;
 
@@ -53,6 +54,12 @@ public sealed class EidClientOptions
     /// (<see cref="ValidationReasons.TrustNoAnchor"/>).
     /// </summary>
     public TrustConfig? Trust { get; init; }
+
+    /// <summary>
+    /// <see cref="EidClient.Qr"/>-ийн итгэл («Миний QR»). null = шигтгэсэн үндэсний root + завсрын 02–04, олгогч 04, AIA-ийн
+    /// OCSP (<see cref="OcspRevocationChecker"/>, hard-fail).
+    /// </summary>
+    public QrTrust? QrTrust { get; init; }
 }
 
 /// <summary>
@@ -124,7 +131,23 @@ public sealed class EidClient : IDisposable
         Sign = new SignService(this);
         Session = new SessionService(this);
         Pdf = new PdfService(this);
+        Organization = new OrganizationService(this);
+        Person = new PersonService(this);
+        Seal = new SealService(this);
+        Token = new TokenService(this);
+        Qr = new EidQrClient(new EidQrOptions
+        {
+            BaseUrl = BaseUrl,
+            RpUuid = options.Credentials.RpUuid,
+            RpName = options.Credentials.RpName,
+            ApiSecret = options.Credentials.ApiSecret,
+            HttpClient = _http,
+            Timeout = Timeout,
+        }, options.QrTrust);
     }
+
+    /// <summary><see cref="ShareAsync"/>-ийн хүсэлтийн хугацаа: CA бүх хүлээн авагчид 120 с-д илгээнэ, nginx 150 с.</summary>
+    public static readonly TimeSpan DefaultShareTimeout = TimeSpan.FromSeconds(150);
 
     /// <summary>Шалгасан суурь URL (төгсгөлийн "/"-гүй).</summary>
     public string BaseUrl { get; }
@@ -158,6 +181,54 @@ public sealed class EidClient : IDisposable
 
     /// <summary>Клиент талын PAdES гарын үсгийн бүртгэл (<c>POST /pdf/signatures</c>).</summary>
     public PdfService Pdf { get; }
+
+    /// <summary>Иргэний төлөөлж чадах байгууллагууд, байгууллагын RP тамганы эрхүүд.</summary>
+    public OrganizationService Organization { get; }
+
+    /// <summary>Иргэний PKI самбар (PKI_READ): гэрчилгээ, төхөөрөмж, үйл ажиллагаа, нэгдсэн тоо, хүүхдүүд.</summary>
+    public PersonService Person { get; }
+
+    /// <summary>Байгууллагын цахим тамга: гэрчилгээ, олголтын хүсэлт, тамганы эрх, digest тамгалах.</summary>
+    public SealService Seal { get; }
+
+    /// <summary>USB токен: гэрчилгээ олголт, токеноор нэвтрэлт.</summary>
+    public TokenService Token { get; }
+
+    /// <summary>«Миний QR» (<see cref="EidClientOptions.QrTrust"/>; энэ client-ийн HttpClient-ийг хуваалцана).</summary>
+    public EidQrClient Qr { get; }
+
+    /// <summary>
+    /// <c>POST /share</c> (SIGN эрх; Go <c>Client.Share</c>): гарын үсэгтэй файлыг (PDF, eID-ийн хүчинтэй гарын үсэгтэй) 1–5
+    /// хүлээн авагч руу имэйлээр, хавсралтаар илгээнэ; CA файлыг хадгалахгүй. HTTP хугацаа = <see cref="DefaultShareTimeout"/>.
+    /// </summary>
+    /// <exception cref="EidShareException">CA-ийн алдаа (Code ∈ <see cref="ShareErrorCodes.All"/>, 422-д Reason, 502-д Sent/Failed/Recipients).</exception>
+    /// <exception cref="EidAuthenticationException">401.</exception>
+    /// <exception cref="EidForbiddenException">403.</exception>
+    /// <exception cref="EidNetworkException">Сүлжээ / timeout.</exception>
+    public async Task<ShareResult> ShareAsync(ShareRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (body, contentType) = ShareWire.Build(request);
+        var path = RpRoutes.Share.Expand();
+        byte[] raw;
+        try
+        {
+            raw = await Http.PostBytesAsync(path, body, contentType, DefaultShareTimeout, ct).ConfigureAwait(false);
+        }
+        catch (EidApiException e)
+        {
+            throw new EidShareException(e);
+        }
+        var r = EidHttp.Decode<ShareResult>(raw, "POST", path) ?? new ShareResult();
+        return r with { Raw = RawJson.Element(raw) };
+    }
+
+    /// <summary>Discovery (<c>/.well-known/eid</c>)-ийн share блок; блок алга (хуучин CA) бол Enabled false.</summary>
+    public async Task<ShareInfo> ShareInfoAsync(CancellationToken ct = default)
+    {
+        var raw = await Http.GetRawAsync(RpRoutes.DiscoveryPath, null, ct).ConfigureAwait(false);
+        return Discovery.Block<ShareInfo>(raw, "share", (v, e) => v with { Raw = e });
+    }
 
     /// <summary>
     /// Session хариуны криптограф баталгаажуулалт (<see cref="ResponseValidator.ValidateAuth"/>,

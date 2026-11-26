@@ -100,6 +100,20 @@ internal sealed class EidHttp
         return raw;
     }
 
+    /// <summary>POST JSON → түүхий бие (4 MiB хүртэл; Raw талбартай хариунд).</summary>
+    public async Task<byte[]> PostRawAsync(string path, object body, TimeSpan? timeout, CancellationToken ct)
+    {
+        var (_, raw) = await SendJsonAsync(HttpMethod.Post, path, Serialize(body), timeout, ct).ConfigureAwait(false);
+        return raw;
+    }
+
+    /// <summary>POST дурын (ж: multipart/form-data) бие → түүхий хариу (4 MiB хүртэл).</summary>
+    public async Task<byte[]> PostBytesAsync(string path, byte[] body, string contentType, TimeSpan? timeout, CancellationToken ct)
+    {
+        var (_, raw) = await SendJsonAsync(HttpMethod.Post, path, body, timeout, ct, contentType).ConfigureAwait(false);
+        return raw;
+    }
+
     private static byte[] Serialize(object body) => JsonSerializer.SerializeToUtf8Bytes(body, body.GetType(), Json);
 
     internal static T? Decode<T>(byte[] raw, string method, string path)
@@ -118,7 +132,8 @@ internal sealed class EidHttp
         }
     }
 
-    private async Task<(int Status, byte[] Body)> SendJsonAsync(HttpMethod method, string path, byte[]? body, TimeSpan? timeout, CancellationToken ct)
+    private async Task<(int Status, byte[] Body)> SendJsonAsync(HttpMethod method, string path, byte[]? body, TimeSpan? timeout, CancellationToken ct,
+        string contentType = "application/json")
     {
         var op = method.Method + " " + RpRoutes.MaskPath(path);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -132,7 +147,7 @@ internal sealed class EidHttp
         if (body is not null)
         {
             req.Content = new ByteArrayContent(body);
-            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            req.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
         }
         try
         {

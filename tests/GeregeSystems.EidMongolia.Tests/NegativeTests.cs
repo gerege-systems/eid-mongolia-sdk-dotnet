@@ -234,8 +234,11 @@ public class NegativeTests
         }
     }
 
-    /// <summary>Delegated responder-ийн зурсан BasicOCSPResponse (good, thisUpdate = now − 1 ц, responder-ийг шигтгэсэн).</summary>
-    private static byte[] OcspResponse(byte[] serial, RSA signer, X509Certificate2 responder)
+    /// <summary>
+    /// Delegated responder-ийн зурсан BasicOCSPResponse (good, thisUpdate = now − 1 ц, responder-ийг шигтгэсэн). CertID-ийн
+    /// issuerNameHash / issuerKeyHash = SHA-1(<paramref name="certIdIssuer"/>-ийн subject / түлхүүр) — null бол тэг байт.
+    /// </summary>
+    private static byte[] OcspResponse(byte[] serial, RSA signer, X509Certificate2 responder, X509Certificate2? certIdIssuer)
     {
         var thisUpdate = Now.AddHours(-1);
         var tbs = new AsnWriter(AsnEncodingRules.DER);
@@ -256,8 +259,8 @@ public class NegativeTests
                         tbs.WriteObjectIdentifier("1.3.14.3.2.26");
                         tbs.WriteNull();
                     }
-                    tbs.WriteOctetString(new byte[20]);
-                    tbs.WriteOctetString(new byte[20]);
+                    tbs.WriteOctetString(certIdIssuer is null ? new byte[20] : SHA1.HashData(certIdIssuer.SubjectName.RawData));
+                    tbs.WriteOctetString(certIdIssuer is null ? new byte[20] : SHA1.HashData(certIdIssuer.PublicKey.EncodedKeyValue.RawData));
                     tbs.WriteInteger(serial);
                 }
                 tbs.WriteNull(new Asn1Tag(TagClass.ContextSpecific, 0));
@@ -310,30 +313,87 @@ public class NegativeTests
         // Эерэг хяналт: CA-ийн гаргасан, хүчинтэй responder → good.
         using (var ok = TestPki.Responder(key, pki.Ca, Now.AddDays(-10), Now.AddDays(10)))
         {
-            Assert.Equal(RevocationStatus.Good, await Checker(OcspResponse(TestPki.LeafSerial, key, ok)).CheckAsync(pki.Leaf, pki.Ca));
+            Assert.Equal(RevocationStatus.Good, await Checker(OcspResponse(TestPki.LeafSerial, key, ok, pki.Ca)).CheckAsync(pki.Leaf, pki.Ca));
         }
 
         // CA-тай холбоогүй (өөрөө зурсан) responder.
         using (var rogue = TestPki.Responder(key, null, Now.AddDays(-10), Now.AddDays(10)))
         {
-            var e = await Assert.ThrowsAsync<EidOcspException>(() => Checker(OcspResponse(TestPki.LeafSerial, key, rogue)).CheckAsync(pki.Leaf, pki.Ca));
+            var e = await Assert.ThrowsAsync<EidOcspException>(() => Checker(OcspResponse(TestPki.LeafSerial, key, rogue, pki.Ca)).CheckAsync(pki.Leaf, pki.Ca));
             Assert.Equal(OcspErrorKinds.Signature, e.Kind);
         }
 
         // CA-ийн гаргасан ч хугацаа нь дууссан responder.
         using (var expired = TestPki.Responder(key, pki.Ca, Now.AddDays(-10), Now.AddDays(-1)))
         {
-            var e = await Assert.ThrowsAsync<EidOcspException>(() => Checker(OcspResponse(TestPki.LeafSerial, key, expired)).CheckAsync(pki.Leaf, pki.Ca));
+            var e = await Assert.ThrowsAsync<EidOcspException>(() => Checker(OcspResponse(TestPki.LeafSerial, key, expired, pki.Ca)).CheckAsync(pki.Leaf, pki.Ca));
             Assert.Equal(OcspErrorKinds.Signature, e.Kind);
         }
 
         // Хүчинтэй responder-ийн хариуны гарын үсгийн байт солигдсон.
         using (var ok = TestPki.Responder(key, pki.Ca, Now.AddDays(-10), Now.AddDays(10)))
         {
-            var der = OcspResponse(TestPki.LeafSerial, key, ok);
+            var der = OcspResponse(TestPki.LeafSerial, key, ok, pki.Ca);
             var (at, len) = OcspSignature(der);
             var e = await Assert.ThrowsAsync<EidOcspException>(() => Checker(Flip(der, at + len / 2)).CheckAsync(pki.Leaf, pki.Ca));
             Assert.Equal(OcspErrorKinds.Signature, e.Kind);
+        }
+    }
+
+    // ── .NET-ийн нэмэлт OCSP хатуурал (cross-SDK review S5; Go/TS хараахан хийдэггүй) ──
+
+    /// <summary>Хариуны CertID-ийн issuerNameHash / issuerKeyHash issuer-ийнхтэй таарахгүй бол (гарын үсэг зөв ч) invalid.</summary>
+    [Fact]
+    public async Task OcspCertIdMustMatchIssuer()
+    {
+        using var pki = new TestPki();
+        using var other = new TestPki();
+        using var key = RSA.Create(2048);
+        using var ok = TestPki.Responder(key, pki.Ca, Now.AddDays(-10), Now.AddDays(10));
+        foreach (var certIdIssuer in new[] { null, other.Ca })
+        {
+            var e = await Assert.ThrowsAsync<EidOcspException>(() =>
+                Checker(OcspResponse(TestPki.LeafSerial, key, ok, certIdIssuer)).CheckAsync(pki.Leaf, pki.Ca));
+            Assert.Equal(OcspErrorKinds.Invalid, e.Kind);
+            Assert.Contains("CertID", e.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Өгсөн issuer leaf-ийг гаргаагүй бол responder-оос асуухгүй (no_issuer, HTTP хүсэлтгүй).</summary>
+    [Fact]
+    public async Task OcspIssuerMustSignLeafBeforeNetwork()
+    {
+        using var pki = new TestPki();
+        using var other = new TestPki();
+        var rec = new Recorder(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var checker = new OcspRevocationChecker(new OcspOptions { HttpClient = new HttpClient(rec), TimeProvider = new ManualClock(Now) });
+        var e = await Assert.ThrowsAsync<EidOcspException>(() => checker.CheckAsync(pki.Leaf, other.Ca));
+        Assert.Equal(OcspErrorKinds.NoIssuer, e.Kind);
+        Assert.Empty(rec.Requests);
+        // Зөв issuer-тэй бол сүлжээ рүү гарна (энд 500 → http_status).
+        Assert.Equal(OcspErrorKinds.HttpStatus, (await Assert.ThrowsAsync<EidOcspException>(() => checker.CheckAsync(pki.Leaf, pki.Ca))).Kind);
+        Assert.Single(rec.Requests);
+    }
+
+    /// <summary>.NET-ийн нэмэлт: subject-д SERIALNUMBER эсвэл CN давхардсан гэрчилгээг validator татгалзана.</summary>
+    [Fact]
+    public void DuplicateSubjectIdentityIsDetected()
+    {
+        foreach (var (oid, ok) in new[] { ("2.5.4.5", false), ("2.5.4.3", false), ("2.5.4.42", true) })
+        {
+            var b = new X500DistinguishedNameBuilder();
+            b.Add("2.5.4.5", "PNOMN-1", UniversalTagNumber.PrintableString);
+            b.AddCommonName("TEST ONLY A");
+            b.Add(oid, "TEST ONLY B", UniversalTagNumber.UTF8String);
+            using var k = RSA.Create(2048);
+            using var c = new CertificateRequest(b.Build(), k, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1).CreateSelfSigned(Now.AddDays(-1), Now.AddDays(1));
+            var p = ParsedCert.Parse(c.RawData);
+            Assert.Equal(!ok, p.DuplicateSubjectIdentity);
+            if (!ok)
+            {
+                Assert.Equal(ValidationReasons.SubjectDuplicateIdentity,
+                    Assert.Throws<EidValidationException>(() => ResponseValidator.CheckSubjectIdentity(p)).Reason);
+            }
         }
     }
 }

@@ -280,4 +280,61 @@ public class ContractTests
         }
         Assert.True(errors.Count == 0, string.Join("\n", errors));
     }
+
+    /// <summary>
+    /// Go contract_test.go TestContractShare / TS contract.test.ts «Share»: endpoints.share-ийн multipart талбарууд
+    /// (<c>{file, filename?, to (1–5), …}</c>) нь <see cref="ShareWire.FormFields"/>-тэй ЯГ тэнцүү (CA үл мэдэгдэх талбарыг
+    /// 400-аар татгалздаг), share блок <see cref="ShareInfo"/>-д задарна.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task ShareMatchesDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        var rpBase = d.GetProperty("rp_api_base").GetString();
+        var desc = d.GetProperty("endpoints").GetProperty("share").GetString() ?? "";
+        Assert.StartsWith("POST " + rpBase + RpRoutes.Share.Path + " ", desc, StringComparison.Ordinal);
+        int i = desc.IndexOf('{', StringComparison.Ordinal), j = desc.IndexOf('}', StringComparison.Ordinal);
+        Assert.True(i >= 0 && j > i, "endpoints.share-д талбар алга: " + desc);
+        var want = desc[(i + 1)..j].Split(',').Select(f =>
+        {
+            f = f.Trim();
+            var k = f.IndexOf(' ', StringComparison.Ordinal); // "to (1–5)"
+            return (k >= 0 ? f[..k] : f).TrimEnd('?');
+        }).OrderBy(x => x, StringComparer.Ordinal);
+        Assert.Equal(want, ShareWire.FormFields.OrderBy(x => x, StringComparer.Ordinal));
+        var raw = System.Text.Encoding.UTF8.GetBytes(d.GetRawText());
+        var s = Discovery.Block<ShareInfo>(raw, "share", (v, e) => v with { Raw = e });
+        Assert.NotNull(s.Raw);
+        Assert.Equal(rpBase + RpRoutes.Share.Path, s.Endpoint);
+        Assert.True(s.MaxFileBytes > 0 && s.MaxRecipients > 0 && s.Formats.Count > 0, "share блок: " + s);
+        Assert.True(s.Quota.PerRpHour > 0 && s.Quota.PerRpDay > 0 && s.Quota.PerRecipientDay > 0, "share.quota: " + s.Quota);
+        _out.WriteLine("share.enabled=" + s.Enabled + " maxFileBytes=" + s.MaxFileBytes + " maxRecipients=" + s.MaxRecipients);
+    }
+
+    /// <summary>
+    /// Go contract_test.go TestContractTokenCertificate: tokenCertificate блок <see cref="TokenCertInfo"/>-д задарч, issue/result
+    /// нь <see cref="RpRoutes"/>-тэй таарна; scopeLockedOnRenewal, appTransaction "optional", personalAutoSupersede, dryRun.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Contract")]
+    public async Task TokenCertificateMatchesDiscovery()
+    {
+        if (await DiscoveryAsync() is not { } d)
+        {
+            return;
+        }
+        var rpBase = d.GetProperty("rp_api_base").GetString();
+        var t = Discovery.Block<TokenCertInfo>(System.Text.Encoding.UTF8.GetBytes(d.GetRawText()), "tokenCertificate", (v, e) => v with { Raw = e });
+        Assert.NotNull(t.Raw);
+        Assert.Equal(rpBase + RpRoutes.TokenCertificate.Path, t.Issue);
+        Assert.Equal(rpBase + RpRoutes.TokenCertificateResult.Path, t.Result);
+        Assert.True(t.ScopeLockedOnRenewal, "scopeLockedOnRenewal");
+        Assert.Equal("optional", t.AppTransaction);
+        Assert.True(t.PersonalAutoSupersede, "personalAutoSupersede");
+        Assert.True(t.DryRun, "dryRun");
+    }
 }
