@@ -549,8 +549,8 @@ string json = rep.ToJson();
   `signature_level`（B/T/LT）、`certificate_level`、`key_medium`。
 - 签名后的修改：每个后续修订都按解析后的对象图比较（CA 公共验证器的规则）——仅新增签名/DSS 时为 `extended_by_signatures_only`；
   可见签名与机构印章外观（带/不带 QR，APPEARANCE_SPEC §5/§6）用写入器代码重新生成后比对；其他一律为 `modified_after_signing`。
-  只有通过完整性校验的后续签名才算作“仅由签名扩展”；可见外观的 `/Name` 必须与该签名证书的显示名（GIVENNAME SURNAME，否则 CN）
-  完全一致——若添加了不同姓名的外观，之前的签名为 `modified_after_signing`。自签名修订以来 xref 条目未变的每个对象（及其对象流）
+  只有通过完整性校验的后续签名才算作“仅由签名扩展”（外观的 `/Name` 不与证书名称比较——eID 桌面客户端在此写入门户的西里尔文
+  姓名，`PrepareOptions.SignerName` 也可设置任意名称；`signer_name` 始终取自证书，语料 v15）。自签名修订以来 xref 条目未变的每个对象（及其对象流）
   必须能在该修订内完整解析（shadow attack——否则为 `modified_after_signing`）。`platform_attested` 姓名只在文档未被修改（或仅由
   签名扩展）时显示。
 - 吊销（eID 04/05 签发的证书）：在线——AIA OCSP，否则 CDP CRL（签发者签名、CertID）；无响应或 `Offline` 时使用文档 DSS 中的
@@ -566,7 +566,7 @@ string json = rep.ToJson();
   SHA-1/MD5/MD2 时为 `weak_algorithm`。DSS：流 ≤ 1 MiB（每类 ≤ 64 个），解码合计 ≤ 8 MiB，被重复引用的流只读取一次。.NET 额外
   防护（不影响报告）：修订解析器递归 ≤ 64、节点 ≤ 1,000,000、解压 ≤ 64 MiB、对象号 < 2^23；读取器每个 FlateDecode 流 ≤ 64 MiB、
   每次打开合计 ≤ 256 MiB、递归 ≤ 512，对象流头部只建立一次索引；证书链构建 ≤ 100 次尝试；OCSP 响应 ≤ 16 KiB，HTTP ≤ 4 MiB、10 秒。
-- 一致性：`testdata/pades-validate` = Go `222acbd` 的 `pades/testdata/validate`（语料 v14，80 个用例；及其引用的 golden 文件）
+- 一致性：`testdata/pades-validate` = Go `9f68390` 的 `pades/testdata/validate`（语料 v15，80 个用例；及其引用的 golden 文件）
   （`./build/sync-validate.sh`，CI `validate-sync`）；每个用例的报告与 Go 的报告深度相等（`ValidatePdfCorpusTests`）。
 
 ## 与 Go / TS 的功能对比

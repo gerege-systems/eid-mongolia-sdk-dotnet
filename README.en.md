@@ -566,9 +566,9 @@ string json = rep.ToJson();
 - Changes after signing: every later revision is compared as a parsed object graph (the CA public validator's rules) — only
   added signatures/DSS give `extended_by_signatures_only`; visible signatures and organisation seal stamps (with/without QR,
   APPEARANCE_SPEC §5/§6) are regenerated with the writer's code and compared; anything else is `modified_after_signing`.
-  Only later signatures that pass integrity count as signature-only extensions; a visible stamp's `/Name` must equal that
-  signature's certificate name (GIVENNAME SURNAME, else CN) — a stamp with a different name makes the earlier signatures
-  `modified_after_signing`. Every object whose xref entry is unchanged since the signed revision (and its object stream) must
+  Only later signatures that pass integrity count as signature-only extensions (a stamp's `/Name` is not compared with its
+  certificate's name — the eID desktop client writes the Cyrillic portal name there and `PrepareOptions.SignerName` may set
+  any name; `signer_name` always comes from the certificate, corpus v15). Every object whose xref entry is unchanged since the signed revision (and its object stream) must
   parse completely inside that revision (shadow attack — otherwise `modified_after_signing`). `platform_attested` names are
   shown only for unmodified (or signature-only extended) documents.
 - Revocation (certificates issued by eID 04/05): online — AIA OCSP, else CDP CRL (issuer signature, CertID); no answer or
@@ -587,7 +587,7 @@ string json = rep.ToJson();
   effect on reports): the revision parser has recursion ≤ 64, ≤ 1,000,000 nodes, inflate ≤ 64 MiB, object numbers < 2^23; the
   reader has every FlateDecode stream ≤ 64 MiB, ≤ 256 MiB per open, recursion ≤ 512, and indexes an object stream's header
   once; chain building ≤ 100 attempts; OCSP answers ≤ 16 KiB, HTTP ≤ 4 MiB, 10 s.
-- Conformance: `testdata/pades-validate` = Go `222acbd` `pades/testdata/validate` (corpus v14, 80 cases; + the golden files
+- Conformance: `testdata/pades-validate` = Go `9f68390` `pades/testdata/validate` (corpus v15, 80 cases; + the golden files
   it references) (`./build/sync-validate.sh`, CI `validate-sync`); every case's report is deep-equal to Go's
   (`ValidatePdfCorpusTests`).
 
