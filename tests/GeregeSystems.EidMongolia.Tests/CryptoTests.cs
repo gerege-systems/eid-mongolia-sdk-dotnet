@@ -67,8 +67,8 @@ public class CryptoTests
     public void InteractionsKeepLineSeparatorsRaw()
     {
         // Go TestInteractionsToBase64_LineSeparators: U+2028/2029 түүхийгээр, «\» → «\\».
-        var got = Json(new Interaction { Type = "x", DisplayText60 = "a b c \\u2028 \\ " });
-        Assert.Equal("[{\"type\":\"x\",\"displayText60\":\"a b c \\\\u2028 \\\\ \"}]", got);
+        var got = Json(new Interaction { Type = "x", DisplayText60 = "a\u2028b\u2029c \\u2028 \\\u2028" });
+        Assert.Equal("[{\"type\":\"x\",\"displayText60\":\"a\u2028b\u2029c \\\\u2028 \\\\\u2028\"}]", got);
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class CryptoTests
         // Ганц surrogate → \uXXXX (жижиг hex, well-formed JSON.stringify); бүтэн хос → түүхий UTF-8.
         Assert.Equal("[{\"type\":\"x\",\"displayText60\":\"a\\ud800b\\udc00\"}]",
             Json(new Interaction { Type = "x", DisplayText60 = "a\ud800b\udc00" }));
-        var emoji = Convert.FromBase64String(EidCrypto.InteractionsToBase64(new[] { new Interaction { Type = "😀" } }));
+        var emoji = Convert.FromBase64String(EidCrypto.InteractionsToBase64(new[] { new Interaction { Type = "\ud83d\ude00" } }));
         Assert.Equal(new byte[] { 0xF0, 0x9F, 0x98, 0x80 }, emoji.AsSpan(10, 4).ToArray());
     }
 
