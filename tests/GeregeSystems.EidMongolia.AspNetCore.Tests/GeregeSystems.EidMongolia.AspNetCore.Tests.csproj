@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel (loopback, port 0) нь shared framework-т — TestHost package хэрэггүй. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/GeregeSystems.EidMongolia.AspNetCore/GeregeSystems.EidMongolia.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fake RP-API (бодит ACSP_V2 гарын үсэг) — core тестийнхтэй ижил файл. -->
+    <Compile Include="../GeregeSystems.EidMongolia.Tests/Login/LoginRig.cs" Link="LoginRig.cs" />
+  </ItemGroup>
+
+</Project>

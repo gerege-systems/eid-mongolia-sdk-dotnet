@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>GeregeSystems.EidMongolia.AspNetCore</RootNamespace>
+
+    <PackageId>GeregeSystems.EidMongolia.AspNetCore</PackageId>
+    <Authors>Gerege Systems LLC</Authors>
+    <Company>Gerege Systems LLC</Company>
+    <Description>ASP.NET Core adapter for the eID Mongolia relying-party SDK (in progress): services.AddEidMongolia(...) and app.MapEidLogin("/auth/eid", ...) over the framework-neutral EidLoginHandler (login-button backend). No package dependencies beyond the ASP.NET Core shared framework.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>eid;mongolia;smart-id;authentication;aspnetcore;rp</PackageTags>
+    <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
+    <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
+    <Version>0.17.0</Version>
+    <!-- Нийтлэхгүй (WP 6 release-ийн өөрчлөлттэй хамт асаана). -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../GeregeSystems.EidMongolia/GeregeSystems.EidMongolia.csproj" />
+  </ItemGroup>
+
+</Project>

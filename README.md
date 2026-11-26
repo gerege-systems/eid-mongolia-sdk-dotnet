@@ -282,6 +282,44 @@ catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal
   вектор, interactions escape; `.github/workflows/contract.yml` нь замын хүснэгтийг live `/.well-known/eid`-тэй өдөр бүр
   тулгана.
 
+### «eID-ээр нэвтрэх» товчны backend (`EidLoginHandler`, ASP.NET Core)
+
+TS SDK-ийн `<eid-login-button>`-ийн backend: `POST {base}/start`, `GET {base}/status`, `GET {base}/callback` (Web2App).
+Framework-аас хамааралгүй цөм — `GeregeSystems.EidMongolia.Login.EidLoginHandler` (`HandleAsync(EidLoginRequest)` →
+`EidLoginResponse`); ASP.NET Core-д `GeregeSystems.EidMongolia.AspNetCore` (shared framework-аас өөр хамааралгүй):
+
+```csharp
+using GeregeSystems.EidMongolia;
+using GeregeSystems.EidMongolia.AspNetCore;
+using GeregeSystems.EidMongolia.Login;
+
+builder.Services.AddEidMongolia(new EidClientOptions
+{
+    Credentials = new EidCredentials(rpUuid, "Миний банк", apiSecret),
+    Trust = new TrustConfig { TrustAnchorsPem = new[] { EidTrust.NationalRootCaPem } },
+});
+var app = builder.Build();
+app.UseForwardedHeaders(); // proxy-ийн ард: KnownProxies-тай тохируулсны дараа RemoteIpAddress зөв
+app.MapEidLogin("/auth/eid", async (http, id) =>
+{
+    // Иргэнийг id.Etsi (PNOMN-…)-ээр таньж ШИНЭ session үүсгэнэ (session fixation).
+    await SignInAsync(http, id.Etsi);
+    return new EidLoginSuccess { Redirect = "/dashboard" };
+}, o =>
+{
+    o.CallbackUrl = "https://bank.example.mn/auth/eid/callback"; // Web2App (зам заавал /auth/eid/callback)
+    o.FailureRedirect = "/login";
+    o.ClientIp = EidLoginClientIp.RemoteAddress; // эсвэл EidLoginClientIp.Forwarded(1) — итгэмжит nginx-ийн ард
+});
+```
+
+Аюулгүй байдал Go `eidlogin` / TS `createEidLogin`-тэй ижил: төлөв серверт (`IEidLoginStore`, анхдагч санах ойн 10 000
+дээд хэмжээтэй), хөтчид зөвхөн HttpOnly + Secure + SameSite=Lax cookie (`<sessionId>.<binding>`, binding-ийн SHA-256-г
+тогтмол хугацаанд тулгана), `Sec-Fetch-Site` cross-site → 403, хязгаар (start: нэг IP-ээс 60 с-д 20; push: нэг дугаарт
+60 с-д 3), бүртгэлгүй дугаарт decoy session + push-ийн 1 с доод хугацаа, ValidateAuth + OCSP (soft-fail анхдагч) дараа
+л `OnSuccess` (нэг удаа), аудитын `OnEvent` (регистрийн оронд HMAC pushKey). Хариуны хэлбэр ба 12 алдааны код нь
+cross-SDK корпусын `testdata/conformance/eidlogin/scenarios.json`-оор (24 сценари) тулгагдана.
+
 ## Хөгжүүлэлт
 
 - Профайлын дүрэм: Go репогийн `pades/PROFILE.md`, `PAGE_SPEC.md`, `PRECHECKS.md`, `WIRE.md`, `APPEARANCE_SPEC.md`,
