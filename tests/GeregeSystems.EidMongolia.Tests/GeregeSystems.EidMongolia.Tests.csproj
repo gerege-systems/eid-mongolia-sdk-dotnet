@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <None Include="../../testdata/devicelink_golden.json" CopyToOutputDirectory="PreserveNewest" Link="testdata/devicelink_golden.json" />
+    <!-- TODO(rp-conformance-v1): Go testdata/conformance-ийн хуулбар (одоогоор алга — glob хоосон). -->
+    <None Include="../../testdata/conformance/**/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="testdata/conformance" />
   </ItemGroup>
 
 </Project>
