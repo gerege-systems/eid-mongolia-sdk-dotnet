@@ -1,4 +1,4 @@
-using System;
+            WeakKey = RsaBits < MinRsaBits || exp < 3 || exp.IsEven;using System;
 using System.Collections.Generic;
 using System.Formats.Asn1;
 using System.Numerics;
@@ -323,17 +323,26 @@ internal sealed class ParsedCert
         if (keyAlg.Oid == OidRsaEncryption)
         {
             KeyKind = KeyKind.Rsa;
-            using var k = CreateRsa();
-            var p = k.ExportParameters(false);
-            var m = p.Modulus ?? Array.Empty<byte>();
+            // RSAPublicKey-г өөрөө задална (Go x509 parsePublicKey): OpenSSL тэгш exponent-тэй түлхүүрийг import хийхгүй («bad e
+            // value») тул сул түлхүүр cert.weak_key биш cert.malformed болох байсан (rp-conformance/2 sign-rsa-even-exponent).
+            var kr = new AsnReader(PublicKeyBits, AsnEncodingRules.DER);
+            var ks = kr.ReadSequence();
+            kr.ThrowIfNotEmpty();
+            var mod = ks.ReadInteger();
+            var exp = ks.ReadInteger();
+            ks.ThrowIfNotEmpty();
+            if (mod.Sign <= 0 || exp.Sign <= 0)
+            {
+                throw new FormatException("x509: RSA modulus / exponent эерэг биш");
+            }
+            var m = mod.ToByteArray(isUnsigned: true, isBigEndian: true);
             var i = 0;
             while (i < m.Length && m[i] == 0)
             {
                 i++;
             }
             RsaBits = i == m.Length ? 0 : (m.Length - i) * 8 - (BitOperations.LeadingZeroCount((uint)m[i]) - 24);
-            var e = new BigInteger(p.Exponent ?? Array.Empty<byte>(), isUnsigned: true, isBigEndian: true);
-            WeakKey = RsaBits < MinRsaBits || e < 3 || e.IsEven;
+            WeakKey = RsaBits < MinRsaBits || exp < 3 || exp.IsEven;
             return;
         }
         if (keyAlg.Oid == OidEcPublicKey)

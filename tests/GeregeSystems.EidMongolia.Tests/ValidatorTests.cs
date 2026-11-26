@@ -81,13 +81,22 @@ public class ValidatorTests
     public void CorpusAndEmbeddedKeysAreNotWeak()
     {
         // RSA-ийн доод хэмжээ 2048 нь корпус ба бодит гинжийн нэг ч түлхүүрийг татгалзахгүй.
-        var pems = Directory.EnumerateFiles(Path.Combine(Corpus.Dir, "pki"), "*.pem").Select(File.ReadAllText)
+        // rp-conformance/2-ийн санаатай сул түлхүүрүүд (cert.weak_key / delegated-weak-key) хасагдана.
+        var pems = Directory.EnumerateFiles(Path.Combine(Corpus.Dir, "pki"), "*.pem")
+            .Where(f => !Path.GetFileName(f).Contains("rsa-1024", StringComparison.Ordinal) &&
+                !Path.GetFileName(f).Contains("even-exponent", StringComparison.Ordinal))
+            .Select(File.ReadAllText)
             .Append(EidTrust.NationalRootCaPem).Concat(EidTrust.CitizenIntermediatesPem).ToList();
         Assert.True(pems.Count > 30);
         foreach (var c in pems.Select(p => ParsedCert.ParsePem(p).Single()))
         {
             Assert.False(c.WeakKey, c.SerialHex());
             Assert.True(c.KeyKind == KeyKind.Ec || c.RsaBits >= ParsedCert.MinRsaBits, c.SerialHex() + ": " + c.RsaBits);
+        }
+        // Санаатай сул түлхүүрүүд задарна (OpenSSL import-гүй) ба WeakKey.
+        foreach (var name in new[] { "leaf-auth-rsa-1024.pem", "leaf-sign-rsa-even-exponent.pem", "ocsp-responder-rsa-1024.pem" })
+        {
+            Assert.True(ParsedCert.ParsePem(File.ReadAllText(Path.Combine(Corpus.Dir, "pki", name))).Single().WeakKey, name);
         }
     }
 
