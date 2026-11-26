@@ -166,6 +166,11 @@ public sealed class EidQrClient : IDisposable
     /// <summary>Нэг poll: RUNNING бол null; COMPLETE+OK бол presentation.jws; бусад COMPLETE бол SESSION_FAILED; 410 → QR_PRESENTATION_GONE.</summary>
     private async Task<string?> PollOnceAsync(QrSession s, TimeSpan poll, CancellationToken ct)
     {
+        // "", ".", ".." — System.Uri dot-segment-ийг арилгаж өөр зам руу явуулна (core RpRoute.CheckSegment).
+        if (s.SessionId is null or "" or "." or "..")
+        {
+            throw new ArgumentException("eid: замын параметр хоосон, \".\" эсвэл \"..\" байж болохгүй", nameof(s));
+        }
         var url = _base + "/session/" + Uri.EscapeDataString(s.SessionId) + "?timeoutMs=" + (long)poll.TotalMilliseconds;
         using var msg = new HttpRequestMessage(HttpMethod.Get, url);
         JsonDocument doc;

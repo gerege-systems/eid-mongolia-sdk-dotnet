@@ -31,6 +31,17 @@ public class RouteTests
         Assert.Throws<InvalidOperationException>(() => RpRoutes.Session.Expand());
         Assert.Throws<InvalidOperationException>(() => RpRoutes.PdfSignatures.Expand("x"));
         Assert.Throws<InvalidOperationException>(() => RpRoutes.SealCertificateRequestStatus.Expand("NTRMN-1"));
+        // Dot-segment: System.Uri "/session/.." → "/" болгодог тул хоосон / "." / ".." татгалзана; "..." ба "a..b" зөв.
+        foreach (var bad in new[] { "", ".", ".." })
+        {
+            Assert.Throws<ArgumentException>(() => RpRoutes.Session.Expand(bad));
+            Assert.Throws<ArgumentException>(() => RpRoutes.SealCertificateRequestStatus.Expand("NTRMN-1", bad));
+            Assert.Throws<ArgumentException>(() => RpRoutes.SealCertificateRequestStatus.Expand(bad, "r1"));
+        }
+        Assert.Equal("/session/...", RpRoutes.Session.Expand("..."));
+        Assert.Equal("/session/a..b", RpRoutes.Session.Expand("a..b"));
+        Assert.Equal("/session/%2F..", RpRoutes.Session.Expand("/.."));
+        Assert.ThrowsAny<ArgumentException>(() => RpRoutes.Session.Expand((string)null!));
     }
 
     [Theory]

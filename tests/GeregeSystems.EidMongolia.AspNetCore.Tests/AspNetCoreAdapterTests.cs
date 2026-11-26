@@ -50,7 +50,6 @@ public class AspNetCoreAdapterTests
             o.CallbackUrl = Callback;
             o.FailureRedirect = "/login";
             o.DisablePushFloor = true;
-            o.ClientIp = EidLoginClientIp.RemoteAddress;
             o.RateLimit = (k, _) =>
             {
                 lock (keys)
@@ -68,6 +67,7 @@ public class AspNetCoreAdapterTests
                 BaseAddress = new Uri(app.Urls.First()),
             };
 
+            // ClientIp өгөөгүй — MapEidLogin-ий анхдагч RemoteAddress (start:127.0.0.1).
             // QR start → HttpOnly/Secure/SameSite cookie, no-store.
             var start = await http.PostAsync("/auth/eid/start", new StringContent("{\"mode\":\"qr\"}", Encoding.UTF8, "application/json"));
             Assert.Equal(HttpStatusCode.OK, start.StatusCode);
@@ -111,6 +111,10 @@ public class AspNetCoreAdapterTests
                 new StringContent("{\"mode\":\"qr\",\"pad\":\"" + new string('x', 8192) + "\"}", Encoding.UTF8, "application/json"));
             Assert.Equal(HttpStatusCode.BadRequest, big.StatusCode);
             Assert.Contains("invalid_body", await big.Content.ReadAsStringAsync());
+            // Ганц surrogate-тэй JSON мөр — 500 биш 400 invalid_body.
+            var lone = await http.PostAsync("/auth/eid/start", new StringContent("{\"mode\":\"\\udc00\"}", Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.BadRequest, lone.StatusCode);
+            Assert.Equal("{\"error\":\"invalid_body\"}", await lone.Content.ReadAsStringAsync());
 
             // Web2App: 302 → eID апп; өөр хөтчийн callback → 303 failure.
             var w = await http.GetAsync("/auth/eid/start?mode=web2app");

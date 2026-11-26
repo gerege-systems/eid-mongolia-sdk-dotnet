@@ -279,6 +279,17 @@ public class LoginSecurityTests
         Assert.Equal(400, (await e.Do("POST", "/auth/eid/start", "{\"mode\":")).Code);
         Assert.Equal("invalid_body", (await e.Do("POST", "/auth/eid/start", "[1]")).Str("error"));
         Assert.Equal("invalid_body", (await e.Do("POST", "/auth/eid/start", "{\"mode\":5}")).Str("error"));
+        // Ганц surrogate (утга ба түлхүүрт) — GetString / TryGetProperty-ийн InvalidOperationException 500 болохгүй.
+        foreach (var lone in new[] { "{\"mode\":\"\\udc00\"}", "{\"mode\":\"qr\",\"idCode\":\"\\ud800x\"}", "{\"\\udc00\":1,\"mode\":\"qr\"}" })
+        {
+            var r = await e.Do("POST", "/auth/eid/start", lone);
+            Assert.True(r.Code is 400 or 200, lone + " → " + r.Code);
+            if (r.Code == 400)
+            {
+                Assert.Equal("invalid_body", r.Str("error"));
+            }
+        }
+        Assert.Equal("invalid_body", (await e.Do("POST", "/auth/eid/start", "{\"mode\":\"\\udc00\"}")).Str("error"));
         Assert.Equal("invalid_mode", (await e.Do("POST", "/auth/eid/start", "null")).Str("error"));
         Assert.Equal("invalid_mode", (await e.Do("POST", "/auth/eid/start", "{\"mode\":\"sms\"}")).Str("error"));
         var big = "{\"mode\":\"qr\",\"pad\":\"" + new string('x', EidLoginHandler.MaxBodyBytes) + "\"}";
@@ -657,6 +668,51 @@ public class LoginSecurityTests
         // Клиент зүүн талын утгыг хуурамчаар бичсэн ч proxy-ийн нэмсэн баруун утга л тооцогдоно.
         Assert.Equal(200, (await e.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", H(("X-Forwarded-For", "1.2.3.4, 198.51.100.7")))).Code);
         Assert.Equal(new[] { "start:198.51.100.7" }, keys);
+
+        // IPv6 → /64 угтвар (Forwarded ба RemoteAddress хоёуланд).
+        keys.Clear();
+        await e.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", H(("X-Forwarded-For", "2001:db8:1:2:aaaa:bbbb:cccc:dddd")));
+        await e.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", H(("X-Forwarded-For", "2001:db8:1:2::9")));
+        Assert.Equal(new[] { "start:2001:db8:1:2::/64", "start:2001:db8:1:2::/64" }, keys);
+        keys.Clear();
+        var ra = LoginEnv.Create(o =>
+        {
+            o.RateLimit = (k, _) =>
+            {
+                keys.Add(k);
+                return new ValueTask<bool>(true);
+            };
+            o.ClientIp = EidLoginClientIp.RemoteAddress;
+        });
+        await ra.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "2001:db8:ffff:1:2:3:4:5");
+        await ra.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "203.0.113.7");
+        Assert.Equal(new[] { "start:2001:db8:ffff:1::/64", "start:203.0.113.7" }, keys);
+    }
+
+    [Fact]
+    public async Task Ipv6ClientsShareOneStartLimitPerSlash64()
+    {
+        var st = LoginEnv.Create(o => o.ClientIp = EidLoginClientIp.RemoteAddress);
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(200, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "2001:db8:1:2::" + (i + 1).ToString("x", System.Globalization.CultureInfo.InvariantCulture))).Code);
+        }
+        Assert.Equal(429, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "2001:db8:1:2:ffff::1")).Code);
+        Assert.Equal(200, (await st.Do("POST", "/auth/eid/start", "{\"mode\":\"qr\"}", ip: "2001:db8:1:3::1")).Code);
+    }
+
+    [Theory]
+    [InlineData("203.0.113.7", "203.0.113.7")]
+    [InlineData("2001:db8:1:2:3:4:5:6", "2001:db8:1:2::/64")]
+    [InlineData("2001:DB8:0:0::1", "2001:db8::/64")]
+    [InlineData("fe80::1%2", "fe80::/64")]
+    [InlineData("::1", "::/64")]
+    [InlineData("::ffff:203.0.113.9", "203.0.113.9")]
+    [InlineData("not-an-ip", "not-an-ip")]
+    [InlineData("2001:db8::zz", "2001:db8::zz")]
+    public void RateKeyIpUsesSlash64ForIpv6(string ip, string want)
+    {
+        Assert.Equal(want, EidLoginHandler.RateKeyIp(ip));
     }
 
     [Fact]
