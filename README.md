@@ -261,6 +261,27 @@ catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal
 `QR_PRESENTATION_GONE` (410), `QR_PENDING` (`ResultAsync`-ийн `maxWait` дууссан — дахин дуудаж болно), `SESSION_FAILED`
 (`EndResult`), серверийн `code` `HttpStatus`-тай (400 `REQUEST_INVALID`, 403 `PERMISSION_DENIED` / `RP_REQUIRED`, 404
 `QR_TOKEN_INVALID`, 409 `NO_SIGNING_CERTIFICATE`, 429 `RATE_LIMITED`), `HTTP_ERROR`, `NETWORK_ERROR`.
+## RP SDK цөм — `GeregeSystems.EidMongolia` (хөгжүүлэлт явагдаж байна)
+
+> **Хөгжүүлэлт явагдаж байна — NuGet-д хараахан нийтлэгдээгүй.** Зорилго: TypeScript ба Go SDK-тэй ижил хүрээтэй бүрэн
+> server-side RP SDK (Auth, Sign, Session, Validator, OCSP, Login backend …). Нийтэлтэл API өөрчлөгдөж болно.
+
+Одоо байгаа хэсэг (`src/GeregeSystems.EidMongolia`, package хамааралгүй, `net8.0` / `net10.0`):
+
+- `EidClient` + `EidClientOptions` / `EidCredentials` — BaseUrl-ийн дүрэм (https; http зөвхөн loopback; хуучин
+  `ca.eidmongolia.mn` хостод тодорхой алдаа), Bearer, timeout (анхдагч 15 с, PDF 80 с), `Accept-Language`, JSON 4 MiB
+  хязгаар; mTLS — client certificate-тэй `HttpClient`-ийг конструкторт өгнө. `client.Auth.SessionTtlAsync()` —
+  discovery-ийн `sessionTtl`.
+- Алдаа: `EidException` (`Code`, `Status`, `RetryAfter`, `Retryable`) → `EidAuthenticationException` (401),
+  `EidForbiddenException` (403), `EidApiException` (код бүрийн дэд ангитай), `EidNetworkException`,
+  `EidResponseTooLargeException`, `EidSessionFailedException`, `EidValidationException`, `EidDeviceLinkException`.
+- Крипто: `Acsp.BuildV2Payload` / `V2Digest`, `EidCrypto.InteractionsToBase64` (JS `JSON.stringify`-тай байт-ижил),
+  `DeviceLink.Build` / `TickQrAsync` (authCode = HMAC-SHA256), `EidCrypto.SessionSecretDigest`, `RandomChallenge`,
+  `UserChallengeOf`.
+- Шалгалт: CA-ийн device-link golden (`testdata/devicelink_golden.json`, SHA-256 тестэд түгжсэн), Smart-ID ACSP_V2
+  вектор, interactions escape; `.github/workflows/contract.yml` нь замын хүснэгтийг live `/.well-known/eid`-тэй өдөр бүр
+  тулгана.
+
 ## Хөгжүүлэлт
 
 - Профайлын дүрэм: Go репогийн `pades/PROFILE.md`, `PAGE_SPEC.md`, `PRECHECKS.md`, `WIRE.md`, `APPEARANCE_SPEC.md`,

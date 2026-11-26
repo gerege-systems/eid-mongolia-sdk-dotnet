@@ -260,6 +260,25 @@ catch (EidQrException e) when (e.Code.StartsWith("QR_", StringComparison.Ordinal
 （`EndResult`）、带 `HttpStatus` 的服务器 `code`（400 `REQUEST_INVALID`，403 `PERMISSION_DENIED` / `RP_REQUIRED`，404
 `QR_TOKEN_INVALID`，409 `NO_SIGNING_CERTIFICATE`，429 `RATE_LIMITED`）、`HTTP_ERROR`、`NETWORK_ERROR`。
 
+## RP SDK 核心——`GeregeSystems.EidMongolia`（开发中）
+
+> **开发中——尚未发布到 NuGet。** 目标：与 TypeScript 和 Go SDK 范围相同的完整服务端 RP SDK（Auth、Sign、Session、
+> Validator、OCSP、登录后端……）。发布前 API 可能变化。
+
+目前已有（`src/GeregeSystems.EidMongolia`，无包依赖，`net8.0` / `net10.0`）：
+
+- `EidClient` + `EidClientOptions` / `EidCredentials`——BaseUrl 规则（https；http 仅限 loopback；旧的
+  `ca.eidmongolia.mn` 主机给出明确错误）、Bearer 认证、超时（默认 15 秒，PDF 80 秒）、`Accept-Language`、JSON 4 MiB
+  上限；mTLS——向构造函数传入带客户端证书的 `HttpClient`。`client.Auth.SessionTtlAsync()`——discovery 的 `sessionTtl`。
+- 错误：`EidException`（`Code`、`Status`、`RetryAfter`、`Retryable`）→ `EidAuthenticationException`（401）、
+  `EidForbiddenException`（403）、`EidApiException`（每个已知代码有子类）、`EidNetworkException`、
+  `EidResponseTooLargeException`、`EidSessionFailedException`、`EidValidationException`、`EidDeviceLinkException`。
+- 加密：`Acsp.BuildV2Payload` / `V2Digest`、`EidCrypto.InteractionsToBase64`（与 JS `JSON.stringify` 字节一致）、
+  `DeviceLink.Build` / `TickQrAsync`（authCode = HMAC-SHA256）、`EidCrypto.SessionSecretDigest`、`RandomChallenge`、
+  `UserChallengeOf`。
+- 验证：CA 的 device-link golden（`testdata/devicelink_golden.json`，测试中固定 SHA-256）、Smart-ID ACSP_V2 向量、
+  interactions 转义；`.github/workflows/contract.yml` 每天将路由表与线上 `/.well-known/eid` 对照。
+
 ## 开发
 
 - 配置文件规则：Go 仓库的 `pades/PROFILE.md`、`PAGE_SPEC.md`、`PRECHECKS.md`、`WIRE.md`、`APPEARANCE_SPEC.md`、

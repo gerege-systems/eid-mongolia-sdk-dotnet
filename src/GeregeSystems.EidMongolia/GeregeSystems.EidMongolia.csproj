@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>GeregeSystems.EidMongolia</RootNamespace>
+
+    <PackageId>GeregeSystems.EidMongolia</PackageId>
+    <Authors>Gerege Systems LLC</Authors>
+    <Company>Gerege Systems LLC</Company>
+    <Description>eID Mongolia relying-party SDK core for .NET (in progress): RP-API client (Bearer, mTLS via HttpClient), typed errors, route table, wire types, ACSP_V2 / device link v3 / authCode helpers. Native C# port of the Go and TypeScript reference SDKs; no package dependencies.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>eid;mongolia;smart-id;authentication;signature;rp</PackageTags>
+    <RepositoryUrl>https://github.com/gerege-systems/eid-mongolia-sdk-dotnet</RepositoryUrl>
+    <PackageProjectUrl>https://developer.eidmongolia.mn/</PackageProjectUrl>
+    <Version>0.17.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GeregeSystems.EidMongolia.Tests" />
+  </ItemGroup>
+
+</Project>
